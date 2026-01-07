@@ -27,7 +27,7 @@
         }
         
         /* Utilities */
-        .safe-pt { padding-top: max(20px, var(--safe-top)); }
+        .safe-pt { padding-top: max(32px, var(--safe-top)); }
         .safe-pb { padding-bottom: max(20px, var(--safe-bottom)); }
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .glass { background: rgba(255, 255, 255, 0.85); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
@@ -56,7 +56,7 @@
 
     <script type="text/babel">
         const { useState, useEffect, useRef, useMemo, useContext, createContext } = React;
-        const { motion, AnimatePresence } = window.Motion;
+        const { motion, AnimatePresence } = window.framerMotion;
 
         // --- 1. CONFIG & THEMES ---
         const THEMES = {
@@ -68,7 +68,7 @@
         // --- 2. DATABASE ---
         const db = new Dexie('HealthOS_DB');
         db.version(2).stores({
-            entries: 'date, weight, *custom', // *custom is for flexible columns
+            entries: 'date, weight',
             settings: 'key',
             goals: 'id'
         });
@@ -82,8 +82,7 @@
         const TodayTab = ({ goals, lastEntry, openEntryModal, theme }) => {
             const getProgress = (goal) => {
                 if (!lastEntry) return 0;
-                // Check standard metric or custom metric
-                const val = lastEntry[goal.metric] || (lastEntry.custom && lastEntry.custom[goal.metric]);
+                const val = lastEntry[goal.metric];
                 if (!val) return 0;
                 return Math.min(100, (val / goal.target) * 100);
             };
@@ -141,7 +140,7 @@
         const HistoryTab = ({ theme }) => {
             const [entries, setEntries] = useState([]);
             const [isEditing, setIsEditing] = useState(false);
-            const [columns, setColumns] = useState(['weight', 'bodyFat']); // Default columns
+            const columns = ['weight', 'bodyFat']; // Fixed columns
 
             useEffect(() => {
                 loadData();
@@ -150,13 +149,6 @@
             const loadData = async () => {
                 const data = await db.entries.orderBy('date').reverse().toArray();
                 setEntries(data);
-                
-                // Discover dynamic columns from data
-                const dynCols = new Set(['weight', 'bodyFat']);
-                data.forEach(e => {
-                    if (e.custom) Object.keys(e.custom).forEach(k => dynCols.add(k));
-                });
-                setColumns(Array.from(dynCols));
             };
 
             const handleDelete = async (date) => {
@@ -167,23 +159,7 @@
             const handleCellEdit = async (date, col, val) => {
                 const num = parseFloat(val);
                 if (isNaN(num)) return;
-                
-                const entry = await db.entries.get(date);
-                if (['weight', 'bodyFat'].includes(col)) {
-                    await db.entries.update(date, { [col]: num });
-                } else {
-                    const custom = entry.custom || {};
-                    custom[col] = num;
-                    await db.entries.update(date, { custom });
-                }
-            };
-
-            const addColumn = () => {
-                const name = prompt("Name of new metric (e.g., 'Water', 'Sleep')");
-                if (name) {
-                    const key = name.toLowerCase().replace(/\s/g, '_');
-                    setColumns(prev => [...prev, key]);
-                }
+                await db.entries.update(date, { [col]: num });
             };
 
             return (
@@ -225,7 +201,7 @@
                                             {row.date.slice(5)}
                                         </td>
                                         {columns.map(col => {
-                                            const val = ['weight', 'bodyFat'].includes(col) ? row[col] : (row.custom?.[col]);
+                                            const val = row[col];
                                             return (
                                                 <td key={col} className="p-0 border-r dark:border-gray-800">
                                                     {isEditing ? (
@@ -246,21 +222,6 @@
                             </tbody>
                         </table>
                     </div>
-
-                    {/* Floating Add Column Button (Only in Edit Mode) */}
-                    <AnimatePresence>
-                        {isEditing && (
-                            <motion.button
-                                initial={{ scale: 0, opacity: 0 }}
-                                animate={{ scale: 1, opacity: 1 }}
-                                exit={{ scale: 0, opacity: 0 }}
-                                onClick={addColumn}
-                                className={`absolute bottom-24 left-6 shadow-xl w-12 h-12 rounded-full ${THEMES[theme].primary} text-white flex items-center justify-center z-30`}
-                            >
-                                <i data-lucide="plus" className="w-6 h-6"></i>
-                            </motion.button>
-                        )}
-                    </AnimatePresence>
                 </div>
             );
         };
@@ -386,7 +347,7 @@
         const EntryModal = ({ close, theme, settings }) => {
             const [data, setData] = useState({ 
                 date: new Date().toISOString().split('T')[0], 
-                weight: '', bodyFat: '', notes: '' 
+                weight: '', bodyFat: '' 
             });
 
             const save = async () => {
@@ -430,16 +391,6 @@
                                     onChange={e => setData({...data, bodyFat: e.target.value})}
                                     className="bg-transparent text-right text-xl outline-none w-24"
                                     placeholder="--"
-                                />
-                            </div>
-
-                            <div className="bg-gray-50 dark:bg-black p-4 rounded-xl">
-                                <label className="block font-medium mb-2">Notes</label>
-                                <textarea 
-                                    value={data.notes}
-                                    onChange={e => setData({...data, notes: e.target.value})}
-                                    className="w-full bg-transparent outline-none resize-none h-20 text-gray-600 dark:text-gray-400"
-                                    placeholder="How are you feeling?"
                                 />
                             </div>
 
@@ -496,6 +447,18 @@
                 else if (settings.mode === 'light') document.documentElement.classList.remove('dark');
                 else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) document.documentElement.classList.add('dark');
             }, [settings.mode]);
+
+            // Update goal units based on settings.unit
+            useEffect(() => {
+                const updatedGoals = goals.map(g => {
+                    if (g.metric === 'weight') {
+                        return { ...g, unit: settings.unit === 'imperial' ? 'lbs' : 'kg' };
+                    }
+                    return g;
+                });
+                setGoals(updatedGoals);
+                db.goals.bulkPut(updatedGoals);
+            }, [settings.unit]);
 
             const refreshData = async () => {
                 const last = await db.entries.orderBy('date').last();
