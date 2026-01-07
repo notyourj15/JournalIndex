@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Body Journal</title>
+    <title>HealthOS Pro</title>
     
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -14,41 +14,34 @@
     <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
     <script src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
+    
     <script src="https://unpkg.com/dexie@3/dist/dexie.min.js"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     
     <script src="https://unpkg.com/framer-motion@10.16.4/dist/framer-motion.js"></script>
 
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1"></script>
+
     <style>
-        /* iOS Safe Area Variables */
         :root {
             --sat: env(safe-area-inset-top);
             --sab: env(safe-area-inset-bottom);
-            --sal: env(safe-area-inset-left);
-            --sar: env(safe-area-inset-right);
         }
-
-        /* Base Styles */
         body { 
-            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            background-color: #F2F2F7; /* iOS Light Gray */
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif;
+            background-color: #F2F2F7;
             -webkit-tap-highlight-color: transparent;
             overscroll-behavior-y: none;
         }
-
-        /* Dark Mode overrides handled by Tailwind 'dark:' classes */
         .dark body { background-color: #000000; }
-
-        /* Utilities */
+        
         .pt-safe { padding-top: max(20px, var(--sat)); }
         .pb-safe { padding-bottom: max(20px, var(--sab)); }
-        .pb-nav { padding-bottom: max(90px, var(--sab)); } /* Spacing for bottom nav */
+        .h-dvh { height: 100dvh; }
         
-        /* Hide Scrollbar */
-        .no-scrollbar::-webkit-scrollbar { display: none; }
-        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-
-        /* Glassmorphism */
         .glass {
             background: rgba(255, 255, 255, 0.85);
             backdrop-filter: blur(20px);
@@ -59,15 +52,13 @@
             background: rgba(28, 28, 30, 0.85);
             border-top: 0.5px solid rgba(255,255,255,0.15);
         }
-
-        /* Input Resets */
-        input[type="date"] { 
-            background: transparent; 
-            font-family: inherit;
-            color: inherit;
-            border: none;
-            text-align: right;
-        }
+        
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        
+        .sticky-col { position: sticky; left: 0; z-index: 20; }
+        .sticky-head { position: sticky; top: 0; z-index: 30; }
+        .sticky-corner { position: sticky; top: 0; left: 0; z-index: 40; }
     </style>
     
     <script>
@@ -76,14 +67,7 @@
             theme: {
                 extend: {
                     colors: {
-                        ios: {
-                            bg: '#F2F2F7',
-                            card: '#FFFFFF',
-                            separator: '#C6C6C8',
-                            blue: '#007AFF',
-                            green: '#34C759',
-                            red: '#FF3B30'
-                        }
+                        ios: { bg: '#F2F2F7', card: '#FFFFFF', blue: '#007AFF' }
                     }
                 }
             }
@@ -94,104 +78,171 @@
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect, useRef, useMemo } = React;
-        const { motion, AnimatePresence } = window.Motion; // Access global Motion object
+        const { useState, useEffect, useRef, useMemo, useCallback } = React;
+        
+        // --- SAFE MOTION ACCESS ---
+        // Fallback object to prevent white-screen crash if CDN fails
+        const MotionLib = window.Motion || { motion: { div: 'div', button: 'button' }, AnimatePresence: ({children}) => children };
+        const { motion, AnimatePresence } = MotionLib;
 
-        // --- 1. CONFIGURATION & THEMES ---
-        const THEMES = {
-            monochrome: { 
-                id: 'monochrome', label: 'Noir', 
-                primary: 'bg-gray-900', text: 'text-gray-900', ring: 'ring-gray-900',
-                gradient: 'from-gray-700 to-gray-900', 
-                activeIcon: 'text-gray-900'
-            },
-            ocean: { 
-                id: 'ocean', label: 'Ocean', 
-                primary: 'bg-blue-600', text: 'text-blue-600', ring: 'ring-blue-600',
-                gradient: 'from-blue-500 to-blue-700',
-                activeIcon: 'text-blue-600'
-            },
-            forest: { 
-                id: 'forest', label: 'Forest', 
-                primary: 'bg-emerald-600', text: 'text-emerald-600', ring: 'ring-emerald-600',
-                gradient: 'from-emerald-500 to-emerald-700',
-                activeIcon: 'text-emerald-600'
+        // --- CHART.JS REGISTRATION ---
+        // Essential: Register plugins or the chart will crash on 'zoom' or 'annotation' keys
+        if (window.Chart) {
+            try {
+                // In browser globals, these plugins are often attached to window['chartjs-plugin-zoom'] etc.
+                // or they auto-register. We try to register them to be safe.
+                Chart.register(window.ChartZoom, window['chartjs-plugin-annotation']); 
+            } catch (e) {
+                console.warn("Chart plugin registration warning:", e);
             }
+        }
+
+        // --- 1. CONFIGURATION ---
+        const THEMES = {
+            monochrome: { id: 'monochrome', label: 'Noir', bg: 'bg-black dark:bg-white', text: 'text-black dark:text-white', accent: 'bg-black dark:bg-white text-white dark:text-black', icon: 'text-black dark:text-white' },
+            ocean: { id: 'ocean', label: 'Ocean', bg: 'bg-blue-600', text: 'text-blue-600', accent: 'bg-blue-500 text-white', icon: 'text-blue-500' },
+            forest: { id: 'forest', label: 'Forest', bg: 'bg-emerald-600', text: 'text-emerald-600', accent: 'bg-emerald-600 text-white', icon: 'text-emerald-600' },
+            mint: { id: 'mint', label: 'Mint', bg: 'bg-teal-400', text: 'text-teal-500', accent: 'bg-teal-400 text-white', icon: 'text-teal-400' },
+            bubblegum: { id: 'bubblegum', label: 'Bubblegum', bg: 'bg-pink-500', text: 'text-pink-500', accent: 'bg-pink-500 text-white', icon: 'text-pink-500' },
+            rose: { id: 'rose', label: 'Rose', bg: 'bg-rose-300', text: 'text-rose-400', accent: 'bg-rose-300 text-white', icon: 'text-rose-400' },
         };
 
-        // --- 2. DATABASE (Dexie) ---
-        const db = new Dexie('BodyJournalDB_V2');
+        const METRICS = {
+            weight: { label: 'Weight', unitType: 'mass', input: true },
+            bmi: { label: 'BMI', unitType: 'index', input: false },
+            bodyFat: { label: 'Body Fat', unitType: 'percent', input: true },
+            fatMass: { label: 'Fat Mass', unitType: 'mass', input: false },
+            leanMass: { label: 'Fat Free Mass', unitType: 'mass', input: false },
+            visceralFat: { label: 'Visceral Fat', unitType: 'index', input: true },
+            bodyWater: { label: 'Body Water', unitType: 'percent', input: true },
+            skeletalMuscle: { label: 'Skeletal Muscle', unitType: 'percent', input: true },
+            muscleMass: { label: 'Muscle Mass', unitType: 'mass', input: false },
+            boneMass: { label: 'Bone Mass', unitType: 'mass', input: true },
+            bmr: { label: 'BMR', unitType: 'cal', input: true },
+        };
+
+        // --- 2. DATABASE ---
+        const db = new Dexie('HealthOS_Pro_V1');
         db.version(1).stores({
-            entries: 'date, weight, bodyFat',
+            entries: 'date', 
             settings: 'key',
             goals: 'id'
         });
 
-        // --- 3. HELPER FUNCTIONS ---
-        const formatDate = (d) => d.toISOString().split('T')[0];
-        
+        // --- 3. UTILS & CONVERSIONS ---
+        const convert = (val, type, toUnit) => {
+            if (val === null || val === undefined || isNaN(val)) return 0;
+            const num = parseFloat(val);
+            if (type === 'percent' || type === 'index' || type === 'cal') return num;
+            if (type === 'mass') {
+                if (toUnit === 'imperial') return num * 2.20462; 
+                return num; 
+            }
+            return num;
+        };
+
+        const fromInput = (val, type, currentUnit) => {
+            if (!val) return null;
+            const num = parseFloat(val);
+            if (type === 'mass' && currentUnit === 'imperial') return num / 2.20462;
+            return num;
+        };
+
+        const formatVal = (val, type, unit) => {
+            if (!val && val !== 0) return '-';
+            const converted = convert(val, type, unit);
+            if (type === 'cal') return Math.round(converted);
+            return converted.toFixed(1);
+        };
+
+        const getUnitLabel = (type, unit) => {
+            if (type === 'percent') return '%';
+            if (type === 'index') return '';
+            if (type === 'cal') return 'kcal';
+            return unit === 'imperial' ? 'lbs' : 'kg';
+        };
+
         // --- 4. COMPONENTS ---
 
-        // --- TAB: TODAY (DASHBOARD) ---
-        const TodayTab = ({ goals, latestEntry, theme }) => {
+        // ERROR BOUNDARY COMPONENT
+        class ErrorBoundary extends React.Component {
+            constructor(props) {
+                super(props);
+                this.state = { hasError: false };
+            }
+            static getDerivedStateFromError(error) { return { hasError: true }; }
+            componentDidCatch(error, errorInfo) { console.error("React Error:", error, errorInfo); }
+            render() {
+                if (this.state.hasError) {
+                    return <div className="p-4 text-center text-red-500">Something went wrong. Reload the app.</div>;
+                }
+                return this.props.children; 
+            }
+        }
+
+        const TodayTab = ({ goals, entries, theme, unit }) => {
+            const sorted = useMemo(() => [...entries].sort((a,b) => new Date(a.date) - new Date(b.date)), [entries]);
+            const first = sorted[0];
+            const latest = sorted[sorted.length - 1];
             const activeGoals = goals.filter(g => g.enabled);
 
-            const getProgress = (goal) => {
-                if (!latestEntry) return 0;
-                const val = parseFloat(latestEntry[goal.key]);
-                if (!val) return 0;
-                // Simple logic: if target < 50 (likely body fat), assume lower is better? 
-                // For simplicity in this prompt, we just show % of target achieved.
-                // In a real app, you'd want 'direction' (lose weight vs gain muscle).
-                return Math.min(100, Math.max(0, (val / goal.target) * 100));
-            };
-
             return (
-                <div className="h-full pt-safe px-6 pb-nav overflow-y-auto no-scrollbar">
-                    <div className="mt-4 mb-8">
-                        <h2 className="text-gray-500 font-semibold uppercase tracking-wider text-xs mb-1">Overview</h2>
+                <div className="h-full pt-safe px-6 pb-24 overflow-y-auto no-scrollbar">
+                    <div className="mt-12 mb-8">
+                        <h2 className="text-gray-500 font-semibold uppercase tracking-wider text-xs mb-1">Dashboard</h2>
                         <h1 className="text-4xl font-bold text-gray-900 dark:text-white tracking-tight">
                             {new Date().toLocaleDateString('en-US', { weekday: 'long' })}
                         </h1>
-                        <p className="text-gray-500 text-lg">
-                            {new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}
-                        </p>
                     </div>
 
-                    <div className="space-y-6">
+                    <div className="space-y-4">
                         {activeGoals.length === 0 ? (
                             <div className="p-8 text-center border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-2xl">
-                                <p className="text-gray-400">No active goals.</p>
-                                <p className="text-xs text-gray-400 mt-1">Enable them in the Goals tab.</p>
+                                <p className="text-gray-400">No active goals set.</p>
                             </div>
                         ) : (
                             activeGoals.map(goal => {
-                                const current = latestEntry ? parseFloat(latestEntry[goal.key]) || 0 : 0;
-                                const percent = (current / goal.target) * 100; // Simplified
+                                const m = METRICS[goal.key];
+                                const curVal = latest ? latest[goal.key] : 0;
+                                const startVal = first ? first[goal.key] : 0;
+                                const goalVal = parseFloat(goal.target);
+
+                                const dispCur = convert(curVal, m.unitType, unit);
+                                const dispStart = convert(startVal, m.unitType, unit);
                                 
+                                const delta = dispCur - dispStart;
+                                // Simple goal progress logic
+                                const pct = (dispCur / goalVal) * 100;
+
                                 return (
-                                    <div key={goal.id} className="bg-white dark:bg-[#1C1C1E] rounded-3xl p-6 shadow-sm">
-                                        <div className="flex justify-between items-end mb-4">
+                                    <div key={goal.id} className="bg-white dark:bg-[#1C1C1E] rounded-3xl p-5 shadow-sm">
+                                        <div className="flex justify-between items-start mb-2">
                                             <div>
-                                                <div className={`text-sm font-bold uppercase tracking-wider mb-1 ${THEMES[theme].text}`}>{goal.label}</div>
-                                                <div className="text-3xl font-bold dark:text-white">
-                                                    {current} <span className="text-sm text-gray-400 font-medium">{goal.unit}</span>
+                                                <div className={`text-xs font-bold uppercase tracking-wider mb-1 ${THEMES[theme].icon}`}>{m.label}</div>
+                                                <div className="flex items-baseline gap-1">
+                                                    <span className="text-3xl font-bold dark:text-white">{formatVal(curVal, m.unitType, unit)}</span>
+                                                    <span className="text-sm text-gray-400 font-medium">{getUnitLabel(m.unitType, unit)}</span>
                                                 </div>
                                             </div>
                                             <div className="text-right">
-                                                <div className="text-xs text-gray-400 mb-1">Target</div>
-                                                <div className="font-semibold dark:text-gray-200">{goal.target} {goal.unit}</div>
+                                                <div className={`text-lg font-bold ${delta > 0 ? 'text-green-500' : delta < 0 ? 'text-blue-500' : 'text-gray-400'}`}>
+                                                    {delta > 0 ? '+' : ''}{delta.toFixed(1)} <span className="text-xs">{getUnitLabel(m.unitType, unit)}</span>
+                                                </div>
+                                                <div className="text-[10px] text-gray-400 uppercase">Change</div>
                                             </div>
                                         </div>
-                                        
-                                        {/* Modern Progress Bar */}
-                                        <div className="h-4 w-full bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
-                                            <motion.div 
-                                                initial={{ width: 0 }}
-                                                animate={{ width: `${Math.min(100, percent)}%` }}
-                                                transition={{ duration: 1, type: "spring" }}
-                                                className={`h-full bg-gradient-to-r ${THEMES[theme].gradient}`}
-                                            />
+                                        <div className="relative pt-2">
+                                            <div className="flex justify-between text-xs text-gray-400 mb-1 font-medium">
+                                                <span>{Math.max(0, Math.min(100, pct)).toFixed(0)}%</span>
+                                                <span>Target: {goalVal}</span>
+                                            </div>
+                                            <div className="h-2 w-full bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
+                                                <motion.div 
+                                                    initial={{ width: 0 }}
+                                                    animate={{ width: `${Math.max(5, Math.min(100, pct))}%` }}
+                                                    className={`h-full ${THEMES[theme].bg}`}
+                                                />
+                                            </div>
                                         </div>
                                     </div>
                                 )
@@ -202,519 +253,382 @@
             );
         };
 
-        // --- TAB: TRENDS ---
-        const TrendsTab = () => (
-            <div className="h-full flex items-center justify-center pt-safe pb-nav text-gray-400">
-                <div className="text-center">
-                    <i data-lucide="bar-chart-2" className="w-12 h-12 mx-auto mb-2 opacity-20"></i>
-                    <p>Visualizations would go here</p>
-                </div>
-            </div>
-        );
+        const TrendsTab = ({ entries, unit, theme }) => {
+            const [activeKey, setActiveKey] = useState('weight');
+            const canvasRef = useRef(null);
+            const chartRef = useRef(null);
 
-        // --- TAB: GOALS (Clock Style) ---
-        const GoalsTab = ({ goals, toggleGoal, theme }) => {
-            return (
-                <div className="h-full pt-safe pb-nav flex flex-col bg-[#F2F2F7] dark:bg-black">
-                    <div className="px-4 py-4">
-                        <h1 className="text-3xl font-bold dark:text-white">Goals</h1>
-                    </div>
+            useEffect(() => {
+                if (!canvasRef.current || entries.length < 2) return;
+
+                const ctx = canvasRef.current.getContext('2d');
+                if (chartRef.current) chartRef.current.destroy();
+
+                const sorted = [...entries].sort((a,b) => new Date(a.date) - new Date(b.date));
+                const labels = sorted.map(e => e.date);
+                const metric = METRICS[activeKey];
+                
+                const values = sorted.map(e => convert(e[activeKey], metric.unitType, unit));
+                
+                // Regression
+                const n = values.length;
+                let sumX = 0, sumY = 0, sumXY = 0, sumXX = 0;
+                values.forEach((y, x) => {
+                    sumX += x;
+                    sumY += y;
+                    sumXY += x * y;
+                    sumXX += x * x;
+                });
+                const slope = (n * sumXY - sumX * sumY) / (n * sumXX - sumX * sumX);
+                const intercept = (sumY - slope * sumX) / n;
+                
+                // Forecast
+                const futureLabels = [...labels];
+                const futureData = [...values];
+                const marginDataHigh = [...values];
+                const marginDataLow = [...values];
+
+                for (let i = 1; i <= 7; i++) {
+                    const nextVal = slope * (n - 1 + i) + intercept;
+                    const margin = (i * 0.2); 
+                    futureData.push(nextVal);
+                    marginDataHigh.push(nextVal + margin);
+                    marginDataLow.push(nextVal - margin);
                     
-                    <div className="mt-2 bg-white dark:bg-[#1C1C1E] border-t border-b border-gray-200 dark:border-gray-800">
-                        {goals.map((goal, idx) => (
-                            <div key={goal.id} className="pl-4">
-                                <div className={`flex items-center justify-between py-3 pr-4 ${idx !== goals.length - 1 ? 'border-b border-gray-100 dark:border-gray-800' : ''}`}>
-                                    <div className="flex items-center gap-3">
-                                        <button 
-                                            onClick={() => toggleGoal(goal.id)}
-                                            className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all duration-200 
-                                                ${goal.enabled 
-                                                    ? `${THEMES[theme].primary} border-transparent` 
-                                                    : 'border-gray-300 dark:border-gray-600 bg-transparent'}`}
-                                        >
-                                            {goal.enabled && <i data-lucide="check" className="w-3.5 h-3.5 text-white stroke-[3]"></i>}
-                                        </button>
-                                        <div className="flex flex-col">
-                                            <span className={`text-lg ${goal.enabled ? 'text-gray-900 dark:text-white font-medium' : 'text-gray-400'}`}>
-                                                {goal.label}
-                                            </span>
-                                        </div>
-                                    </div>
-                                    <div className="text-gray-500 dark:text-gray-400 font-normal">
-                                        {goal.target} <span className="text-sm">{goal.unit}</span>
-                                    </div>
-                                </div>
-                            </div>
+                    const lastDate = new Date(futureLabels[futureLabels.length - 1]);
+                    lastDate.setDate(lastDate.getDate() + 1);
+                    futureLabels.push(lastDate.toISOString().split('T')[0]);
+                }
+
+                const accentColor = window.matchMedia('(prefers-color-scheme: dark)').matches ? '#FFFFFF' : '#000000';
+
+                try {
+                    chartRef.current = new Chart(ctx, {
+                        type: 'line',
+                        data: {
+                            labels: futureLabels,
+                            datasets: [
+                                { label: 'History', data: values, borderColor: accentColor, borderWidth: 3, tension: 0.4, pointRadius: 2, order: 1 },
+                                { label: 'Prediction', data: futureData, borderColor: accentColor, borderDash: [5, 5], borderWidth: 2, pointRadius: 0, tension: 0.4, order: 2 },
+                                { label: 'Margin', data: marginDataHigh, fill: '+1', backgroundColor: 'rgba(120, 120, 120, 0.1)', borderColor: 'transparent', pointRadius: 0, tension: 0.4, order: 3 },
+                                { label: 'MarginLow', data: marginDataLow, borderColor: 'transparent', pointRadius: 0, tension: 0.4, order: 4 }
+                            ]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            interaction: { mode: 'index', intersect: false },
+                            plugins: {
+                                legend: { display: false },
+                                zoom: {
+                                    zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' },
+                                    pan: { enabled: true, mode: 'x' }
+                                }
+                            },
+                            scales: {
+                                x: { grid: { display: false }, ticks: { display: false } }, 
+                                y: { grid: { color: 'rgba(200,200,200,0.1)' }, border: { display: false } }
+                            }
+                        }
+                    });
+                } catch (err) {
+                    console.error("Chart Error:", err);
+                }
+
+                return () => chartRef.current?.destroy();
+            }, [entries, activeKey, unit, theme]);
+
+            return (
+                <div className="h-full pt-safe px-4 pb-24 flex flex-col bg-white dark:bg-black">
+                    <div className="py-6">
+                        <h1 className="text-3xl font-bold dark:text-white px-2">Trends</h1>
+                    </div>
+                    <div className="flex overflow-x-auto no-scrollbar space-x-3 pb-4 px-2">
+                        {Object.entries(METRICS).map(([key, m]) => (
+                            <button key={key} onClick={() => setActiveKey(key)}
+                                className={`flex-shrink-0 px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider border transition-all
+                                    ${activeKey === key 
+                                        ? `${THEMES[theme].accent} border-transparent shadow-lg` 
+                                        : 'bg-gray-50 dark:bg-[#1C1C1E] text-gray-500 border-transparent'}`}>
+                                {m.label}
+                            </button>
                         ))}
                     </div>
-                    <p className="px-4 mt-4 text-xs text-gray-500">
-                        Checked goals will appear on your Today dashboard.
-                    </p>
+                    <div className="flex-1 min-h-0 bg-gray-50 dark:bg-[#1C1C1E] rounded-3xl p-4 relative shadow-inner">
+                        <canvas ref={canvasRef} />
+                    </div>
+                    <div className="text-center text-xs text-gray-400 mt-4 mb-2">
+                        Pinch to zoom • Dotted line indicates prediction
+                    </div>
                 </div>
             );
         };
 
-        // --- TAB: HISTORY (Spreadsheet) ---
-        const HistoryTab = ({ theme, unit }) => {
-            const [entries, setEntries] = useState([]);
-            const [isEditing, setIsEditing] = useState(false);
-            const [sortDesc, setSortDesc] = useState(true);
-
-            useEffect(() => { loadEntries(); }, [sortDesc]);
-
-            const loadEntries = async () => {
-                let data = await db.entries.toArray();
-                data.sort((a, b) => sortDesc ? new Date(b.date) - new Date(a.date) : new Date(a.date) - new Date(b.date));
-                setEntries(data);
-            };
-
-            const updateEntry = async (date, field, value) => {
-                // If date changes, we need to delete old key and add new one
-                if (field === 'date') {
-                    const oldEntry = entries.find(e => e.date === date);
-                    if (!oldEntry) return;
-                    await db.entries.delete(date); // Delete old key
-                    await db.entries.put({ ...oldEntry, date: value }); // Add new key
-                } else {
-                    await db.entries.update(date, { [field]: value });
-                }
-                loadEntries();
-            };
-
-            const deleteEntry = async (date) => {
-                await db.entries.delete(date);
-                loadEntries();
-            };
-
-            const addRow = async () => {
-                const today = formatDate(new Date());
-                // Simple logic to avoid duplicate key error if today exists: append a random string or check existence
-                // For simplicity, we assume user adds distinct dates or handles overwrite
-                await db.entries.put({ date: today, weight: '', bodyFat: '' });
-                loadEntries();
-            };
+        const HistoryTab = ({ entries, deleteEntry, theme, unit }) => {
+            const sorted = useMemo(() => [...entries].sort((a,b) => new Date(b.date) - new Date(a.date)), [entries]);
 
             return (
-                <div className="h-full pt-safe pb-nav flex flex-col bg-white dark:bg-black">
-                    <div className="px-4 py-4 flex justify-between items-end bg-white/90 dark:bg-black/90 backdrop-blur-sm z-10 sticky top-0">
-                        <div>
-                             <h1 className="text-3xl font-bold dark:text-white">History</h1>
-                             <button onClick={() => setSortDesc(!sortDesc)} className="text-xs font-semibold text-gray-400 mt-1 uppercase flex items-center gap-1">
-                                Sort: {sortDesc ? 'Newest' : 'Oldest'} <i data-lucide="arrow-up-down" className="w-3 h-3"></i>
-                             </button>
-                        </div>
-                        <button 
-                            onClick={() => setIsEditing(!isEditing)}
-                            className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${isEditing ? `${THEMES[theme].primary} text-white shadow-lg` : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300'}`}
-                        >
-                            <i data-lucide={isEditing ? "check" : "pencil"} className="w-5 h-5"></i>
-                        </button>
+                <div className="h-full pt-safe pb-24 flex flex-col bg-white dark:bg-black">
+                     <div className="px-6 py-6 bg-white/95 dark:bg-black/95 backdrop-blur z-20 sticky top-0">
+                         <h1 className="text-3xl font-bold dark:text-white">History</h1>
                     </div>
-
-                    <div className="flex-1 overflow-auto relative">
-                        <table className="w-full text-left border-collapse">
-                            <thead className="bg-gray-50 dark:bg-[#1C1C1E] text-gray-500 dark:text-gray-400 text-xs uppercase tracking-wider sticky top-0 z-20 shadow-sm">
+                    <div className="flex-1 overflow-auto relative touch-pan-x touch-pan-y">
+                        <table className="border-collapse min-w-full">
+                            <thead className="bg-gray-50 dark:bg-[#1C1C1E] sticky-head shadow-sm">
                                 <tr>
-                                    <th className={`w-10 pl-4 py-3 transition-all ${!isEditing && 'w-0 overflow-hidden pl-0 opacity-0'}`}></th>
-                                    <th className="px-4 py-3 font-semibold">Date</th>
-                                    <th className="px-4 py-3 font-semibold text-right">Weight <span className="lowercase">({unit})</span></th>
-                                    <th className="px-4 py-3 font-semibold text-right">Body Fat %</th>
+                                    <th className="sticky-corner bg-gray-50 dark:bg-[#1C1C1E] z-50 p-3 text-left w-12"></th>
+                                    <th className="sticky-col bg-gray-50 dark:bg-[#1C1C1E] p-3 text-xs font-bold text-gray-500 uppercase tracking-wider text-left min-w-[100px] shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">Date</th>
+                                    {Object.entries(METRICS).map(([key, m]) => (
+                                        <th key={key} className="p-3 text-xs font-bold text-gray-500 uppercase tracking-wider text-right min-w-[100px] whitespace-nowrap">
+                                            {m.label} <span className="text-[9px] opacity-70">({getUnitLabel(m.unitType, unit)})</span>
+                                        </th>
+                                    ))}
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                                {entries.map((row) => (
-                                    <tr key={row.date} className="group bg-white dark:bg-black">
-                                        <td className={`pl-4 py-3 align-middle transition-all ${!isEditing ? 'hidden' : ''}`}>
-                                            <button onClick={() => deleteEntry(row.date)} className="w-6 h-6 bg-red-500 rounded-full flex items-center justify-center text-white shadow active:scale-90 transition-transform">
-                                                <i data-lucide="minus" className="w-4 h-4"></i>
+                                {sorted.map((row) => (
+                                    <tr key={row.date} className="bg-white dark:bg-black hover:bg-gray-50 dark:hover:bg-gray-900">
+                                        <td className="sticky-col left-0 z-10 bg-white dark:bg-black p-2 text-center">
+                                            <button onClick={() => deleteEntry(row.date)} className="w-6 h-6 bg-red-100 text-red-500 rounded-full flex items-center justify-center">
+                                                <i data-lucide="minus" className="w-3 h-3"></i>
                                             </button>
                                         </td>
-                                        <td className="px-4 py-3">
-                                            {isEditing ? (
-                                                <input 
-                                                    type="date" 
-                                                    value={row.date} 
-                                                    onChange={(e) => updateEntry(row.date, 'date', e.target.value)}
-                                                    className="w-full bg-transparent outline-none dark:text-white text-left font-mono text-sm"
-                                                />
-                                            ) : (
-                                                <span className="font-medium text-gray-900 dark:text-white text-sm">{row.date}</span>
-                                            )}
+                                        <td className="sticky-col left-8 z-10 bg-white dark:bg-black p-3 text-sm font-medium dark:text-white border-r border-gray-100 dark:border-gray-800 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">
+                                            {new Date(row.date).toLocaleDateString(undefined, {month:'numeric', day:'numeric', year:'2-digit'})}
                                         </td>
-                                        <td className="px-4 py-3 text-right">
-                                            {isEditing ? (
-                                                <input 
-                                                    type="number" inputMode="decimal" step="0.1"
-                                                    value={row.weight}
-                                                    onChange={(e) => updateEntry(row.date, 'weight', e.target.value)}
-                                                    className="w-full bg-blue-50 dark:bg-blue-900/20 rounded px-2 py-1 text-right outline-none dark:text-white"
-                                                />
-                                            ) : (
-                                                <span className="text-gray-600 dark:text-gray-300">{row.weight || '-'}</span>
-                                            )}
-                                        </td>
-                                        <td className="px-4 py-3 text-right">
-                                            {isEditing ? (
-                                                <input 
-                                                    type="number" inputMode="decimal" step="0.1"
-                                                    value={row.bodyFat}
-                                                    onChange={(e) => updateEntry(row.date, 'bodyFat', e.target.value)}
-                                                    className="w-full bg-blue-50 dark:bg-blue-900/20 rounded px-2 py-1 text-right outline-none dark:text-white"
-                                                />
-                                            ) : (
-                                                <span className="text-gray-600 dark:text-gray-300">{row.bodyFat || '-'}</span>
-                                            )}
-                                        </td>
+                                        {Object.entries(METRICS).map(([key, m]) => (
+                                            <td key={key} className="p-3 text-right text-sm text-gray-600 dark:text-gray-300">
+                                                {formatVal(row[key], m.unitType, unit)}
+                                            </td>
+                                        ))}
                                     </tr>
                                 ))}
                             </tbody>
                         </table>
                     </div>
-
-                    {/* Floating Add Row Button (Only visible in edit mode) */}
-                    <AnimatePresence>
-                        {isEditing && (
-                            <motion.button
-                                initial={{ scale: 0, opacity: 0 }}
-                                animate={{ scale: 1, opacity: 1 }}
-                                exit={{ scale: 0, opacity: 0 }}
-                                onClick={addRow}
-                                className={`absolute bottom-6 left-6 w-12 h-12 rounded-full ${THEMES[theme].primary} text-white shadow-xl flex items-center justify-center z-30`}
-                            >
-                                <i data-lucide="plus" className="w-6 h-6"></i>
-                            </motion.button>
-                        )}
-                    </AnimatePresence>
                 </div>
             );
         };
 
-        // --- TAB: SETTINGS ---
+        const GoalsTab = ({ goals, toggleGoal, theme }) => (
+            <div className="h-full pt-safe pb-24 flex flex-col bg-[#F2F2F7] dark:bg-black">
+                <div className="px-6 py-6">
+                    <h1 className="text-3xl font-bold dark:text-white">Goals</h1>
+                </div>
+                <div className="bg-white dark:bg-[#1C1C1E] border-y border-gray-200 dark:border-gray-800">
+                    {goals.map((g, i) => (
+                        <button key={g.id} onClick={() => toggleGoal(g.id)} 
+                            className={`w-full flex items-center pl-6 py-3 active:bg-gray-50 dark:active:bg-gray-800 transition-colors ${i !== goals.length - 1 ? 'border-b border-gray-100 dark:border-gray-800' : ''}`}>
+                            <div className={`w-6 h-6 rounded-full border-2 mr-4 flex items-center justify-center transition-all ${g.enabled ? `${THEMES[theme].accent} border-transparent` : 'border-gray-300 dark:border-gray-600'}`}>
+                                {g.enabled && <i data-lucide="check" className="w-3.5 h-3.5 stroke-[3]"></i>}
+                            </div>
+                            <div className="flex-1 flex justify-between items-center pr-6">
+                                <span className={`text-lg font-medium ${g.enabled ? 'text-gray-900 dark:text-white' : 'text-gray-400'}`}>{g.label}</span>
+                                <span className="text-gray-400">{g.target}</span>
+                            </div>
+                        </button>
+                    ))}
+                </div>
+            </div>
+        );
+
         const SettingsTab = ({ settings, setSettings, theme }) => {
-            const update = (key, val) => {
-                const newS = { ...settings, [key]: val };
-                setSettings(newS);
-                db.settings.put({ key: 'config', val: newS });
+            const update = (k, v) => {
+                const s = { ...settings, [k]: v };
+                setSettings(s);
+                db.settings.put({ key: 'config', val: s });
             };
-
             return (
-                <div className="h-full pt-safe pb-nav px-4 bg-[#F2F2F7] dark:bg-black overflow-y-auto">
-                    <h1 className="text-3xl font-bold dark:text-white mb-6 mt-4 px-2">Settings</h1>
-
+                <div className="h-full pt-safe px-6 pb-24 bg-[#F2F2F7] dark:bg-black overflow-y-auto">
+                    <h1 className="text-3xl font-bold dark:text-white mt-12 mb-8">Settings</h1>
                     <div className="space-y-6">
-                        {/* Appearance */}
-                        <section>
-                            <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 pl-2">Appearance</h3>
-                            <div className="bg-white dark:bg-[#1C1C1E] rounded-xl overflow-hidden shadow-sm">
-                                <div className="p-4 flex items-center justify-between border-b border-gray-100 dark:border-gray-800">
-                                    <span className="dark:text-white">Dark Mode</span>
-                                    <select 
-                                        value={settings.mode}
-                                        onChange={(e) => update('mode', e.target.value)}
-                                        className="bg-gray-100 dark:bg-black text-gray-800 dark:text-gray-200 text-sm rounded-lg px-3 py-1.5 outline-none border-none"
-                                    >
-                                        <option value="auto">Auto</option>
-                                        <option value="light">Light</option>
-                                        <option value="dark">Dark</option>
-                                    </select>
-                                </div>
-                                <div className="p-4 flex items-center justify-between">
-                                    <span className="dark:text-white">Theme Color</span>
-                                    <div className="flex space-x-3">
-                                        {Object.values(THEMES).map(t => (
-                                            <button 
-                                                key={t.id}
-                                                onClick={() => update('theme', t.id)}
-                                                className={`w-6 h-6 rounded-full ${t.primary} ring-offset-2 dark:ring-offset-[#1C1C1E] transition-all ${settings.theme === t.id ? `ring-2 ${t.ring}` : ''}`}
-                                            />
-                                        ))}
-                                    </div>
-                                </div>
-                            </div>
-                        </section>
-
-                        {/* Units */}
-                        <section>
-                            <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 pl-2">Units</h3>
-                            <div className="bg-white dark:bg-[#1C1C1E] rounded-xl overflow-hidden shadow-sm p-4 flex justify-between items-center">
-                                <span className="dark:text-white">System</span>
-                                <div className="bg-gray-100 dark:bg-black p-1 rounded-lg flex text-xs font-bold">
-                                    <button 
-                                        onClick={() => update('unit', 'imperial')}
-                                        className={`px-4 py-1.5 rounded-md transition-all ${settings.unit === 'imperial' ? 'bg-white dark:bg-[#2C2C2E] text-black dark:text-white shadow-sm' : 'text-gray-400'}`}
-                                    >
-                                        Imperial
+                        <div className="bg-white dark:bg-[#1C1C1E] rounded-2xl p-4 shadow-sm">
+                            <h3 className="text-xs font-bold text-gray-400 uppercase mb-3">Unit System</h3>
+                            <div className="flex bg-gray-100 dark:bg-black p-1 rounded-xl">
+                                {['imperial', 'metric'].map(u => (
+                                    <button key={u} onClick={() => update('unit', u)} 
+                                        className={`flex-1 py-2 rounded-lg text-sm font-semibold capitalize transition-all ${settings.unit === u ? 'bg-white dark:bg-gray-800 shadow text-black dark:text-white' : 'text-gray-400'}`}>
+                                        {u}
                                     </button>
-                                    <button 
-                                        onClick={() => update('unit', 'metric')}
-                                        className={`px-4 py-1.5 rounded-md transition-all ${settings.unit === 'metric' ? 'bg-white dark:bg-[#2C2C2E] text-black dark:text-white shadow-sm' : 'text-gray-400'}`}
-                                    >
-                                        Metric
-                                    </button>
-                                </div>
+                                ))}
                             </div>
-                        </section>
+                        </div>
+                        <div className="bg-white dark:bg-[#1C1C1E] rounded-2xl p-4 shadow-sm">
+                            <h3 className="text-xs font-bold text-gray-400 uppercase mb-3">Theme</h3>
+                            <div className="grid grid-cols-3 gap-3">
+                                {Object.values(THEMES).map(t => (
+                                    <button key={t.id} onClick={() => update('theme', t.id)} className="flex flex-col items-center gap-2 p-2">
+                                        <div className={`w-8 h-8 rounded-full ${t.bg} ring-2 ring-offset-2 dark:ring-offset-gray-900 ${settings.theme === t.id ? 'ring-gray-400' : 'ring-transparent'}`} />
+                                        <span className="text-[10px] text-gray-500 font-medium">{t.label}</span>
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
                     </div>
                 </div>
             );
         };
 
-        // --- COMPONENT: ADD ENTRY MODAL ---
-        const EntryModal = ({ close, theme, unit }) => {
-            const [data, setData] = useState({ 
-                weight: '', 
-                bodyFat: '',
-                date: formatDate(new Date()) 
-            });
+        const EntryModal = ({ close, theme, unit, latest }) => {
+            const [data, setData] = useState({ date: new Date().toISOString().split('T')[0] });
+
+            useEffect(() => {
+                const init = {};
+                Object.keys(METRICS).forEach(k => {
+                    if(METRICS[k].input) init[k] = '';
+                });
+                setData(d => ({ ...d, ...init }));
+            }, []);
+
+            const handleChange = (key, val) => setData(d => ({ ...d, [key]: val }));
 
             const save = async () => {
-                await db.entries.put(data);
+                const entry = { date: data.date };
+                Object.keys(METRICS).forEach(k => {
+                    if (METRICS[k].input && data[k]) {
+                        entry[k] = fromInput(data[k], METRICS[k].unitType, unit);
+                    }
+                });
+                
+                // Basic Calcs
+                const w = entry.weight;
+                const bf = entry.bodyFat;
+                if (w && bf) {
+                    entry.fatMass = w * (bf / 100);
+                    entry.leanMass = w - entry.fatMass;
+                }
+                
+                await db.entries.put(entry);
                 close(true);
             };
 
             return (
-                <div className="fixed inset-0 z-50 flex flex-col justify-end">
-                    {/* Backdrop */}
-                    <motion.div 
-                        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                        className="absolute inset-0 bg-black/40 backdrop-blur-sm"
-                        onClick={() => close(false)}
-                    />
-                    
-                    {/* Sheet */}
-                    <motion.div 
-                        initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
-                        transition={{ type: "spring", damping: 25, stiffness: 200 }}
-                        className="relative z-10 bg-white dark:bg-[#1C1C1E] rounded-t-[32px] p-6 pb-safe pt-4 shadow-2xl"
-                    >
-                        {/* Drag Handle */}
-                        <div className="w-12 h-1.5 bg-gray-300 dark:bg-gray-700 rounded-full mx-auto mb-6" />
-
-                        <div className="flex justify-between items-center mb-6">
-                            <h2 className="text-2xl font-bold dark:text-white">New Entry</h2>
-                            <input 
-                                type="date" 
-                                value={data.date} 
-                                onChange={e => setData({...data, date: e.target.value})}
-                                className="text-gray-500 dark:text-gray-400 bg-transparent outline-none"
-                            />
+                <motion.div initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} transition={{ type: "spring", damping: 25 }}
+                    className="fixed inset-x-0 bottom-0 top-12 z-50 bg-white dark:bg-[#1C1C1E] rounded-t-[32px] flex flex-col shadow-2xl">
+                    <div className="flex justify-between items-center p-6 border-b border-gray-100 dark:border-gray-800">
+                        <button onClick={() => close(false)} className="text-gray-400 font-medium">Cancel</button>
+                        <h2 className="text-lg font-bold dark:text-white">New Entry</h2>
+                        <button onClick={save} className={`${THEMES[theme].icon} font-bold`}>Save</button>
+                    </div>
+                    <div className="flex-1 overflow-y-auto p-6 space-y-6 pb-32">
+                        <div className="flex justify-center mb-6">
+                            <input type="date" value={data.date} onChange={e => handleChange('date', e.target.value)} 
+                                className="bg-gray-100 dark:bg-black px-4 py-2 rounded-xl dark:text-white outline-none" />
                         </div>
-
-                        <div className="space-y-4 mb-8">
-                            <div className="bg-gray-50 dark:bg-black p-5 rounded-2xl flex items-center justify-between">
-                                <label className="text-sm font-bold text-gray-500 uppercase">Weight ({unit})</label>
-                                <input 
-                                    type="number" inputMode="decimal" autoFocus
-                                    placeholder="0.0"
-                                    value={data.weight}
-                                    onChange={e => setData({...data, weight: e.target.value})}
-                                    className="bg-transparent text-right text-3xl font-light outline-none dark:text-white w-32"
-                                />
+                        {Object.entries(METRICS).filter(([_, m]) => m.input).map(([key, m]) => (
+                            <div key={key} className="bg-gray-50 dark:bg-black p-4 rounded-2xl flex justify-between items-center">
+                                <label className="text-sm font-bold text-gray-500 uppercase">{m.label}</label>
+                                <div className="flex items-baseline gap-2">
+                                    <input type="number" inputMode="decimal"
+                                        value={data[key] || ''}
+                                        onChange={e => handleChange(key, e.target.value)}
+                                        placeholder="-"
+                                        className="bg-transparent text-right text-2xl font-light outline-none dark:text-white w-32"
+                                    />
+                                    <span className="text-xs text-gray-400 font-bold w-6">{getUnitLabel(m.unitType, unit)}</span>
+                                </div>
                             </div>
-                            <div className="bg-gray-50 dark:bg-black p-5 rounded-2xl flex items-center justify-between">
-                                <label className="text-sm font-bold text-gray-500 uppercase">Body Fat %</label>
-                                <input 
-                                    type="number" inputMode="decimal"
-                                    placeholder="0.0"
-                                    value={data.bodyFat}
-                                    onChange={e => setData({...data, bodyFat: e.target.value})}
-                                    className="bg-transparent text-right text-3xl font-light outline-none dark:text-white w-32"
-                                />
-                            </div>
-                        </div>
-
-                        <button 
-                            onClick={save}
-                            className={`w-full py-4 rounded-xl font-bold text-white text-lg shadow-lg active:scale-[0.98] transition-transform ${THEMES[theme].primary}`}
-                        >
-                            Save Log
-                        </button>
-                    </motion.div>
-                </div>
+                        ))}
+                    </div>
+                </motion.div>
             );
         };
 
-        // --- MAIN APP ---
         const App = () => {
-            const [activeTab, setActiveTab] = useState('today');
+            const [tab, setTab] = useState('today');
             const [prevTab, setPrevTab] = useState('today');
-            const [showModal, setShowModal] = useState(false);
-            const [latestEntry, setLatestEntry] = useState(null);
+            const [modal, setModal] = useState(false);
+            const [entries, setEntries] = useState([]);
+            const [settings, setSettings] = useState({ theme: 'monochrome', unit: 'imperial' });
+            const [goals, setGoals] = useState(() => Object.keys(METRICS).map((k, i) => ({ id: i, key: k, label: METRICS[k].label, target: 0, enabled: k === 'weight' })));
 
-            // App State
-            const [settings, setSettings] = useState({ theme: 'monochrome', unit: 'imperial', mode: 'auto' });
-            const [goals, setGoals] = useState([
-                { id: 1, label: 'Weight', key: 'weight', target: 170, unit: 'lbs', enabled: true },
-                { id: 2, label: 'Body Fat', key: 'bodyFat', target: 15, unit: '%', enabled: true }
-            ]);
-
-            // Tabs config for Order
-            const tabsOrder = ['today', 'trends', 'goals', 'history', 'settings'];
-            
-            // Initialization
             useEffect(() => {
                 const init = async () => {
                     const s = await db.settings.get('config');
                     if (s) setSettings(s.val);
-                    
                     const g = await db.goals.toArray();
                     if (g.length) setGoals(g);
-                    else await db.goals.bulkPut(goals);
-
-                    await refreshData();
-                };
-                init();
-            }, []);
-
-            // Effect: Theme Application
-            useEffect(() => {
-                const applyMode = () => {
-                    if (settings.mode === 'dark' || (settings.mode === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
-                        document.documentElement.classList.add('dark');
-                    } else {
-                        document.documentElement.classList.remove('dark');
+                    refresh();
+                    
+                    if (window.lucide) {
+                        lucide.createIcons();
                     }
                 };
-                applyMode();
-                window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyMode);
-                return () => window.matchMedia('(prefers-color-scheme: dark)').removeEventListener('change', applyMode);
-            }, [settings.mode]);
+                init();
+            }, [tab, modal]); // Re-run lucide on tab change
 
-            // Effect: Update Goal Units
             useEffect(() => {
-                const updated = goals.map(g => g.key === 'weight' ? { ...g, unit: settings.unit === 'imperial' ? 'lbs' : 'kg' } : g);
-                if (JSON.stringify(updated) !== JSON.stringify(goals)) {
-                    setGoals(updated);
-                    db.goals.bulkPut(updated);
+                if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+                    document.documentElement.classList.add('dark');
                 }
-            }, [settings.unit]);
+            }, []);
 
-            const refreshData = async () => {
-                const last = await db.entries.orderBy('date').last();
-                setLatestEntry(last);
+            const refresh = async () => setEntries(await db.entries.toArray());
+            const toggleGoal = async (id) => {
+                const g = goals.map(x => x.id === id ? { ...x, enabled: !x.enabled } : x);
+                setGoals(g);
+                await db.goals.bulkPut(g);
             };
 
-            const switchTab = (tab) => {
-                setPrevTab(activeTab);
-                setActiveTab(tab);
-            };
-
-            const toggleGoal = (id) => {
-                const newGoals = goals.map(g => g.id === id ? { ...g, enabled: !g.enabled } : g);
-                setGoals(newGoals);
-                db.goals.bulkPut(newGoals);
-            };
-
-            // Animation Variants
-            const direction = tabsOrder.indexOf(activeTab) > tabsOrder.indexOf(prevTab) ? 1 : -1;
-            const variants = {
-                enter: (dir) => ({ x: dir > 0 ? '100%' : '-100%' }),
-                center: { x: 0 },
-                exit: (dir) => ({ x: dir > 0 ? '-25%' : '25%' }) // Parallax effect
-            };
-
-            useEffect(() => { lucide.createIcons(); }, [activeTab]);
+            const switchTab = (t) => { setPrevTab(tab); setTab(t); };
+            const direction = ['today', 'trends', 'goals', 'history', 'settings'].indexOf(tab) > ['today', 'trends', 'goals', 'history', 'settings'].indexOf(prevTab) ? 1 : -1;
 
             return (
-                <div className={`h-[100dvh] w-screen overflow-hidden flex flex-col ${THEMES[settings.theme].text.replace('text-', 'selection:bg-')}`}>
-                    
-                    {/* Main Content Area */}
-                    <div className="flex-1 relative bg-[#F2F2F7] dark:bg-black">
-                        <AnimatePresence initial={false} custom={direction}>
-                            <motion.div
-                                key={activeTab}
-                                custom={direction}
-                                variants={variants}
-                                initial="enter"
-                                animate="center"
-                                exit="exit"
-                                transition={{ type: "tween", ease: "circOut", duration: 0.3 }}
-                                className="absolute inset-0 w-full h-full bg-[#F2F2F7] dark:bg-black shadow-2xl"
-                            >
-                                {activeTab === 'today' && <TodayTab goals={goals} latestEntry={latestEntry} theme={settings.theme} />}
-                                {activeTab === 'trends' && <TrendsTab />}
-                                {activeTab === 'goals' && <GoalsTab goals={goals} toggleGoal={toggleGoal} theme={settings.theme} />}
-                                {activeTab === 'history' && <HistoryTab theme={settings.theme} unit={settings.unit} />}
-                                {activeTab === 'settings' && <SettingsTab settings={settings} setSettings={setSettings} theme={settings.theme} />}
-                            </motion.div>
+                <ErrorBoundary>
+                    <div className={`h-dvh w-screen overflow-hidden flex flex-col ${THEMES[settings.theme].text.replace('text-', 'selection:bg-')}`}>
+                        <button onClick={() => switchTab('settings')} className="absolute top-4 right-6 z-50 p-2 rounded-full bg-gray-100/50 dark:bg-gray-800/50 backdrop-blur pt-safe">
+                            <i data-lucide="settings-2" className="w-5 h-5 opacity-70"></i>
+                        </button>
+
+                        <div className="flex-1 relative bg-[#F2F2F7] dark:bg-black">
+                            <AnimatePresence custom={direction} initial={false}>
+                                <motion.div key={tab} custom={direction} 
+                                    initial={{ x: direction > 0 ? '100%' : '-100%' }} animate={{ x: 0 }} exit={{ x: direction > 0 ? '-20%' : '20%' }} 
+                                    transition={{ type: "tween", ease: "circOut", duration: 0.3 }}
+                                    className="absolute inset-0 bg-[#F2F2F7] dark:bg-black shadow-2xl">
+                                    {tab === 'today' && <TodayTab goals={goals} entries={entries} theme={settings.theme} unit={settings.unit} />}
+                                    {tab === 'trends' && <TrendsTab entries={entries} theme={settings.theme} unit={settings.unit} />}
+                                    {tab === 'goals' && <GoalsTab goals={goals} toggleGoal={toggleGoal} theme={settings.theme} />}
+                                    {tab === 'history' && <HistoryTab entries={entries} deleteEntry={async (d) => { await db.entries.delete(d); refresh(); }} theme={settings.theme} unit={settings.unit} />}
+                                    {tab === 'settings' && <SettingsTab settings={settings} setSettings={setSettings} theme={settings.theme} />}
+                                </motion.div>
+                            </AnimatePresence>
+                        </div>
+
+                        <div className="fixed bottom-0 left-0 right-0 z-50 flex justify-center pointer-events-none pb-24">
+                            <motion.button 
+                                animate={{ scale: tab === 'settings' ? 0.8 : 1, filter: tab === 'settings' ? 'grayscale(100%)' : 'none', opacity: tab === 'settings' ? 0.5 : 1 }}
+                                onClick={() => tab !== 'settings' && setModal(true)}
+                                className={`w-16 h-16 rounded-full ${THEMES[settings.theme].accent} shadow-2xl flex items-center justify-center pointer-events-auto border-4 border-[#F2F2F7] dark:border-black`}>
+                                <i data-lucide="plus" className="w-8 h-8"></i>
+                            </motion.button>
+                        </div>
+
+                        <div className="fixed bottom-0 left-0 right-0 glass z-40 pb-safe pt-2 h-[88px] flex justify-around items-start border-t border-gray-200 dark:border-gray-800">
+                            {['today', 'trends', 'goals', 'history'].map(id => (
+                                <button key={id} onClick={() => switchTab(id)} className={`flex flex-col items-center w-16 pt-2 ${tab === id ? THEMES[settings.theme].icon : 'text-gray-400'}`}>
+                                    <i data-lucide={id === 'today' ? 'layout-dashboard' : id === 'trends' ? 'activity' : id === 'goals' ? 'target' : 'table-2'} className="w-6 h-6 mb-1"></i>
+                                    <span className="text-[10px] font-medium capitalize">{id}</span>
+                                </button>
+                            ))}
+                        </div>
+
+                        <AnimatePresence>
+                            {modal && (
+                                <>
+                                    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} 
+                                        className="fixed inset-0 bg-black/40 backdrop-blur-sm z-40" onClick={() => setModal(false)} />
+                                    <EntryModal close={(r) => { setModal(false); if(r) refresh(); }} theme={settings.theme} unit={settings.unit} latest={entries[entries.length-1]} />
+                                </>
+                            )}
                         </AnimatePresence>
                     </div>
-
-                    {/* Bottom Navigation */}
-                    <nav className="fixed bottom-0 left-0 right-0 glass z-40 pb-safe pt-2 border-t border-gray-200 dark:border-gray-800">
-                        <div className="flex justify-around items-end h-[60px]">
-                            <NavIcon id="today" icon="layout-dashboard" label="Today" active={activeTab} set={switchTab} theme={settings.theme} />
-                            <NavIcon id="trends" icon="activity" label="Trends" active={activeTab} set={switchTab} theme={settings.theme} />
-                            
-                            {/* Spacer for FAB */}
-                            <div className="w-16"></div>
-
-                            <NavIcon id="goals" icon="target" label="Goals" active={activeTab} set={switchTab} theme={settings.theme} />
-                            <NavIcon id="history" icon="table-2" label="History" active={activeTab} set={switchTab} theme={settings.theme} />
-                        </div>
-                    </nav>
-                    
-                    {/* Settings Icon (Absolute Positioned for Layout balance) */}
-                    <button 
-                        onClick={() => switchTab('settings')}
-                        className={`fixed bottom-0 right-4 z-50 pb-safe mb-3 transition-colors ${activeTab === 'settings' ? THEMES[settings.theme].activeIcon : 'text-gray-400'}`}
-                    >
-                         <i data-lucide="settings-2" className="w-6 h-6"></i>
-                    </button>
-
-                    {/* FAB (Floating Action Button) */}
-                    <AnimatePresence>
-                        {activeTab !== 'settings' && (
-                            <motion.div
-                                initial={{ y: 100 }} animate={{ y: 0 }} exit={{ y: 100 }}
-                                className="fixed bottom-0 left-0 right-0 z-50 flex justify-center pb-safe pointer-events-none"
-                            >
-                                <motion.button
-                                    whileTap={{ scale: 0.9 }}
-                                    onClick={() => setShowModal(true)}
-                                    className={`mb-6 pointer-events-auto w-14 h-14 rounded-full ${THEMES[settings.theme].primary} text-white shadow-lg shadow-black/20 flex items-center justify-center border-4 border-[#F2F2F7] dark:border-black`}
-                                >
-                                    <i data-lucide="plus" className="w-8 h-8"></i>
-                                </motion.button>
-                            </motion.div>
-                        )}
-                    </AnimatePresence>
-
-                    {/* Entry Modal */}
-                    <AnimatePresence>
-                        {showModal && (
-                            <EntryModal 
-                                close={(refresh) => { setShowModal(false); if(refresh) refreshData(); }} 
-                                theme={settings.theme}
-                                unit={settings.unit}
-                            />
-                        )}
-                    </AnimatePresence>
-                </div>
+                </ErrorBoundary>
             );
         };
 
-        const NavIcon = ({ id, icon, label, active, set, theme }) => (
-            <button 
-                onClick={() => set(id)} 
-                className={`flex flex-col items-center justify-center w-16 h-full transition-colors ${active === id ? THEMES[theme].activeIcon : 'text-gray-400'}`}
-            >
-                <i data-lucide={icon} className="w-6 h-6 mb-1"></i>
-                <span className="text-[10px] font-medium">{label}</span>
-            </button>
-        );
-
         const root = ReactDOM.createRoot(document.getElementById('root'));
         root.render(<App />);
-    </script>
-    
-    <script>
-        // Init Service Worker
-        if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => {
-                navigator.serviceWorker.register('./sw.js').catch(err => console.log('SW fail', err));
-            });
-        }
     </script>
 </body>
 </html>
