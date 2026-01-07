@@ -1,4 +1,4 @@
-const CACHE_NAME = 'health-os-v2';
+const CACHE_NAME = 'body-journal-v2';
 const ASSETS = [
   './',
   './index.html',
@@ -7,7 +7,6 @@ const ASSETS = [
   'https://unpkg.com/react-dom@18/umd/react-dom.production.min.js',
   'https://unpkg.com/babel-standalone@6/babel.min.js',
   'https://unpkg.com/dexie@3/dist/dexie.min.js',
-  'https://cdn.jsdelivr.net/npm/chart.js',
   'https://unpkg.com/lucide@latest',
   'https://unpkg.com/framer-motion@10.16.4/dist/framer-motion.js'
 ];

@@ -1,340 +1,720 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="antialiased">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Health Journal</title>
+    <title>Body Journal</title>
     
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="apple-touch-icon" href="https://img.icons8.com/ios-filled/180/4a90e2/scale-tool.png">
 
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
     <script src="https://unpkg.com/dexie@3/dist/dexie.min.js"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
+    
     <script src="https://unpkg.com/framer-motion@10.16.4/dist/framer-motion.js"></script>
 
     <style>
-        :root { --safe-top: env(safe-area-inset-top); --safe-bottom: env(safe-area-inset-bottom); }
-        body { 
-            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; 
-            background-color: #F2F2F7;
-            overflow: hidden; 
-            overscroll-behavior: none;
+        /* iOS Safe Area Variables */
+        :root {
+            --sat: env(safe-area-inset-top);
+            --sab: env(safe-area-inset-bottom);
+            --sal: env(safe-area-inset-left);
+            --sar: env(safe-area-inset-right);
         }
-        .dark body { background-color: #000000; }
-        .safe-pt { padding-top: max(20px, var(--safe-top)); }
-        .safe-pb { padding-bottom: max(20px, var(--safe-bottom)); }
-        .glass { background: rgba(255, 255, 255, 0.8); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); }
-        .dark .glass { background: rgba(28, 28, 30, 0.8); }
-        .no-scrollbar::-webkit-scrollbar { display: none; }
-        
-        /* Spreadsheet Styling */
-        table { border-collapse: separate; border-spacing: 0; }
-        th, td { border-bottom: 0.5px solid #E5E5EA; }
-        .dark th, .dark td { border-bottom: 0.5px solid #38383A; }
-    </style>
 
+        /* Base Styles */
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #F2F2F7; /* iOS Light Gray */
+            -webkit-tap-highlight-color: transparent;
+            overscroll-behavior-y: none;
+        }
+
+        /* Dark Mode overrides handled by Tailwind 'dark:' classes */
+        .dark body { background-color: #000000; }
+
+        /* Utilities */
+        .pt-safe { padding-top: max(20px, var(--sat)); }
+        .pb-safe { padding-bottom: max(20px, var(--sab)); }
+        .pb-nav { padding-bottom: max(90px, var(--sab)); } /* Spacing for bottom nav */
+        
+        /* Hide Scrollbar */
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+        /* Glassmorphism */
+        .glass {
+            background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border-top: 0.5px solid rgba(0,0,0,0.1);
+        }
+        .dark .glass {
+            background: rgba(28, 28, 30, 0.85);
+            border-top: 0.5px solid rgba(255,255,255,0.15);
+        }
+
+        /* Input Resets */
+        input[type="date"] { 
+            background: transparent; 
+            font-family: inherit;
+            color: inherit;
+            border: none;
+            text-align: right;
+        }
+    </style>
+    
     <script>
         tailwind.config = {
             darkMode: 'class',
             theme: {
                 extend: {
                     colors: {
-                        brand: { blue: '#007AFF', green: '#34C759', mono: '#1C1C1E' }
+                        ios: {
+                            bg: '#F2F2F7',
+                            card: '#FFFFFF',
+                            separator: '#C6C6C8',
+                            blue: '#007AFF',
+                            green: '#34C759',
+                            red: '#FF3B30'
+                        }
                     }
                 }
             }
         }
     </script>
 </head>
-<body class="transition-colors duration-300">
+<body>
     <div id="root"></div>
 
     <script type="text/babel">
-        // Link Framer Motion from Window
-        const { motion, AnimatePresence } = window.Motion;
-        const { useState, useEffect, useMemo } = React;
+        const { useState, useEffect, useRef, useMemo } = React;
+        const { motion, AnimatePresence } = window.Motion; // Access global Motion object
 
-        // --- 1. CONFIG ---
-        const METRICS = [
-            { key: 'weight', label: 'Weight', unit: 'lb', target: 180 },
-            { key: 'bodyFat', label: 'Body Fat', unit: '%', target: 15 },
-            { key: 'visceral', label: 'Visceral', unit: 'lvl', target: 8 },
-            { key: 'muscle', label: 'Muscle', unit: '%', target: 40 },
-            { key: 'water', label: 'Water', unit: '%', target: 60 },
-            { key: 'bone', label: 'Bone', unit: 'lb', target: 8 },
-            { key: 'bmr', label: 'BMR', unit: 'kcal', target: 2000 }
-        ];
-
+        // --- 1. CONFIGURATION & THEMES ---
         const THEMES = {
-            blue: { bg: 'bg-[#007AFF]', text: 'text-[#007AFF]', ring: 'ring-[#007AFF]' },
-            green: { bg: 'bg-[#34C759]', text: 'text-[#34C759]', ring: 'ring-[#34C759]' },
-            monochrome: { bg: 'bg-[#1C1C1E]', text: 'text-[#1C1C1E]', ring: 'ring-[#1C1C1E]' }
+            monochrome: { 
+                id: 'monochrome', label: 'Noir', 
+                primary: 'bg-gray-900', text: 'text-gray-900', ring: 'ring-gray-900',
+                gradient: 'from-gray-700 to-gray-900', 
+                activeIcon: 'text-gray-900'
+            },
+            ocean: { 
+                id: 'ocean', label: 'Ocean', 
+                primary: 'bg-blue-600', text: 'text-blue-600', ring: 'ring-blue-600',
+                gradient: 'from-blue-500 to-blue-700',
+                activeIcon: 'text-blue-600'
+            },
+            forest: { 
+                id: 'forest', label: 'Forest', 
+                primary: 'bg-emerald-600', text: 'text-emerald-600', ring: 'ring-emerald-600',
+                gradient: 'from-emerald-500 to-emerald-700',
+                activeIcon: 'text-emerald-600'
+            }
         };
 
-        // --- 2. DB ---
-        const db = new Dexie('HealthJournal_V3');
-        db.version(1).stores({ 
-            entries: 'date',
-            settings: 'id',
-            goals: 'key' 
+        // --- 2. DATABASE (Dexie) ---
+        const db = new Dexie('BodyJournalDB_V2');
+        db.version(1).stores({
+            entries: 'date, weight, bodyFat',
+            settings: 'key',
+            goals: 'id'
         });
 
-        // --- 3. COMPONENTS ---
+        // --- 3. HELPER FUNCTIONS ---
+        const formatDate = (d) => d.toISOString().split('T')[0];
+        
+        // --- 4. COMPONENTS ---
 
-        const App = () => {
-            const [tab, setTab] = useState('today');
-            const [prevTab, setPrevTab] = useState('today');
-            const [showModal, setShowModal] = useState(false);
-            const [entries, setEntries] = useState([]);
-            const [settings, setSettings] = useState({ theme: 'blue', mode: 'light', unit: 'imperial' });
-            const [activeGoals, setActiveGoals] = useState(['weight', 'bodyFat']);
+        // --- TAB: TODAY (DASHBOARD) ---
+        const TodayTab = ({ goals, latestEntry, theme }) => {
+            const activeGoals = goals.filter(g => g.enabled);
 
-            useEffect(() => {
-                const load = async () => {
-                    const s = await db.settings.get(1);
-                    if (s) setSettings(s.data);
-                    const g = await db.goals.toArray();
-                    if (g.length) setActiveGoals(g.map(item => item.key));
-                    refreshData();
-                };
-                load();
-            }, []);
-
-            const refreshData = async () => {
-                const data = await db.entries.orderBy('date').reverse().toArray();
-                setEntries(data);
-                lucide.createIcons();
+            const getProgress = (goal) => {
+                if (!latestEntry) return 0;
+                const val = parseFloat(latestEntry[goal.key]);
+                if (!val) return 0;
+                // Simple logic: if target < 50 (likely body fat), assume lower is better? 
+                // For simplicity in this prompt, we just show % of target achieved.
+                // In a real app, you'd want 'direction' (lose weight vs gain muscle).
+                return Math.min(100, Math.max(0, (val / goal.target) * 100));
             };
-
-            const switchTab = (newTab) => {
-                setPrevTab(tab);
-                setTab(newTab);
-            };
-
-            const direction = METRICS.findIndex(m => m.key === tab) > METRICS.findIndex(m => m.key === prevTab) ? 1 : -1;
 
             return (
-                <div className={`${settings.mode === 'dark' ? 'dark' : ''} h-screen flex flex-col bg-[#F2F2F7] dark:bg-black text-black dark:text-white`}>
-                    
-                    {/* View Container */}
-                    <main className="flex-1 relative safe-pt overflow-hidden">
-                        <AnimatePresence initial={false} custom={direction}>
-                            <motion.div
-                                key={tab}
-                                custom={direction}
-                                initial={{ x: direction * 100 + '%', opacity: 0 }}
-                                animate={{ x: 0, opacity: 1 }}
-                                exit={{ x: direction * -100 + '%', opacity: 0 }}
-                                transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-                                className="absolute inset-0 w-full h-full p-6"
-                            >
-                                {tab === 'today' && <Dashboard entries={entries} activeGoals={activeGoals} settings={settings} />}
-                                {tab === 'history' && <History entries={entries} refresh={refreshData} settings={settings} />}
-                                {tab === 'goals' && <Goals active={activeGoals} toggle={(key) => {
-                                    const next = activeGoals.includes(key) ? activeGoals.filter(k => k !== key) : [...activeGoals, key];
-                                    setActiveGoals(next);
-                                    db.goals.clear().then(() => db.goals.bulkPut(next.map(key => ({key}))));
-                                }} settings={settings} />}
-                                {tab === 'settings' && <Settings settings={settings} setSettings={(s) => {
-                                    setSettings(s);
-                                    db.settings.put({id: 1, data: s});
-                                }} />}
-                            </motion.div>
-                        </AnimatePresence>
-                    </main>
+                <div className="h-full pt-safe px-6 pb-nav overflow-y-auto no-scrollbar">
+                    <div className="mt-4 mb-8">
+                        <h2 className="text-gray-500 font-semibold uppercase tracking-wider text-xs mb-1">Overview</h2>
+                        <h1 className="text-4xl font-bold text-gray-900 dark:text-white tracking-tight">
+                            {new Date().toLocaleDateString('en-US', { weekday: 'long' })}
+                        </h1>
+                        <p className="text-gray-500 text-lg">
+                            {new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}
+                        </p>
+                    </div>
 
-                    {/* Navigation Bar */}
-                    <nav className="glass border-t border-[#C6C6C8] dark:border-[#38383A] h-[88px] safe-pb flex justify-around items-center px-4 z-50">
-                        <NavBtn id="today" icon="layout-grid" label="Today" active={tab} set={switchTab} theme={settings.theme} />
-                        <NavBtn id="history" icon="table" label="History" active={tab} set={switchTab} theme={settings.theme} />
-                        
-                        <div className="w-16 flex justify-center">
-                            {tab !== 'settings' && (
-                                <button 
-                                    onClick={() => setShowModal(true)}
-                                    className={`w-14 h-14 rounded-full ${THEMES[settings.theme].bg} text-white shadow-lg flex items-center justify-center -mt-10 border-[5px] border-[#F2F2F7] dark:border-black active:scale-90 transition-transform`}
-                                >
-                                    <i data-lucide="plus" className="w-8 h-8"></i>
-                                </button>
-                            )}
-                        </div>
-
-                        <NavBtn id="goals" icon="check-circle" label="Goals" active={tab} set={switchTab} theme={settings.theme} />
-                        <NavBtn id="settings" icon="settings" label="Settings" active={tab} set={switchTab} theme={settings.theme} />
-                    </nav>
-
-                    {/* Entry Modal */}
-                    <AnimatePresence>
-                        {showModal && <EntryModal close={(r) => { setShowModal(false); if(r) refreshData(); }} theme={settings.theme} />}
-                    </AnimatePresence>
+                    <div className="space-y-6">
+                        {activeGoals.length === 0 ? (
+                            <div className="p-8 text-center border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-2xl">
+                                <p className="text-gray-400">No active goals.</p>
+                                <p className="text-xs text-gray-400 mt-1">Enable them in the Goals tab.</p>
+                            </div>
+                        ) : (
+                            activeGoals.map(goal => {
+                                const current = latestEntry ? parseFloat(latestEntry[goal.key]) || 0 : 0;
+                                const percent = (current / goal.target) * 100; // Simplified
+                                
+                                return (
+                                    <div key={goal.id} className="bg-white dark:bg-[#1C1C1E] rounded-3xl p-6 shadow-sm">
+                                        <div className="flex justify-between items-end mb-4">
+                                            <div>
+                                                <div className={`text-sm font-bold uppercase tracking-wider mb-1 ${THEMES[theme].text}`}>{goal.label}</div>
+                                                <div className="text-3xl font-bold dark:text-white">
+                                                    {current} <span className="text-sm text-gray-400 font-medium">{goal.unit}</span>
+                                                </div>
+                                            </div>
+                                            <div className="text-right">
+                                                <div className="text-xs text-gray-400 mb-1">Target</div>
+                                                <div className="font-semibold dark:text-gray-200">{goal.target} {goal.unit}</div>
+                                            </div>
+                                        </div>
+                                        
+                                        {/* Modern Progress Bar */}
+                                        <div className="h-4 w-full bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
+                                            <motion.div 
+                                                initial={{ width: 0 }}
+                                                animate={{ width: `${Math.min(100, percent)}%` }}
+                                                transition={{ duration: 1, type: "spring" }}
+                                                className={`h-full bg-gradient-to-r ${THEMES[theme].gradient}`}
+                                            />
+                                        </div>
+                                    </div>
+                                )
+                            })
+                        )}
+                    </div>
                 </div>
             );
         };
 
-        const NavBtn = ({ id, icon, label, active, set, theme }) => (
-            <button onClick={() => set(id)} className={`flex flex-col items-center w-12 transition-colors ${active === id ? THEMES[theme].text : 'text-[#8E8E93]'}`}>
-                <i data-lucide={icon} className="w-6 h-6"></i>
-                <span className="text-[10px] font-medium mt-1">{label}</span>
-            </button>
+        // --- TAB: TRENDS ---
+        const TrendsTab = () => (
+            <div className="h-full flex items-center justify-center pt-safe pb-nav text-gray-400">
+                <div className="text-center">
+                    <i data-lucide="bar-chart-2" className="w-12 h-12 mx-auto mb-2 opacity-20"></i>
+                    <p>Visualizations would go here</p>
+                </div>
+            </div>
         );
 
-        // --- DASHBOARD VIEW ---
-        const Dashboard = ({ entries, activeGoals, settings }) => {
-            const last = entries[0] || {};
+        // --- TAB: GOALS (Clock Style) ---
+        const GoalsTab = ({ goals, toggleGoal, theme }) => {
             return (
-                <div className="space-y-6 h-full overflow-y-auto no-scrollbar pb-24">
-                    <header>
-                        <h2 className="text-[#8E8E93] font-semibold text-sm uppercase tracking-tight">Overview</h2>
-                        <h1 className="text-3xl font-bold">Health Status</h1>
-                    </header>
-                    <div className="grid gap-4">
-                        {activeGoals.map(key => {
-                            const m = METRICS.find(i => i.key === key);
-                            const val = last[key] || 0;
-                            const progress = Math.min(100, (val / m.target) * 100);
-                            return (
-                                <div key={key} className="bg-white dark:bg-[#1C1C1E] p-4 rounded-2xl shadow-sm">
-                                    <div className="flex justify-between items-end mb-2">
-                                        <span className="font-semibold text-gray-500">{m.label}</span>
-                                        <span className="text-xl font-bold">{val}<span className="text-xs ml-1 text-gray-400">{m.unit}</span></span>
+                <div className="h-full pt-safe pb-nav flex flex-col bg-[#F2F2F7] dark:bg-black">
+                    <div className="px-4 py-4">
+                        <h1 className="text-3xl font-bold dark:text-white">Goals</h1>
+                    </div>
+                    
+                    <div className="mt-2 bg-white dark:bg-[#1C1C1E] border-t border-b border-gray-200 dark:border-gray-800">
+                        {goals.map((goal, idx) => (
+                            <div key={goal.id} className="pl-4">
+                                <div className={`flex items-center justify-between py-3 pr-4 ${idx !== goals.length - 1 ? 'border-b border-gray-100 dark:border-gray-800' : ''}`}>
+                                    <div className="flex items-center gap-3">
+                                        <button 
+                                            onClick={() => toggleGoal(goal.id)}
+                                            className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all duration-200 
+                                                ${goal.enabled 
+                                                    ? `${THEMES[theme].primary} border-transparent` 
+                                                    : 'border-gray-300 dark:border-gray-600 bg-transparent'}`}
+                                        >
+                                            {goal.enabled && <i data-lucide="check" className="w-3.5 h-3.5 text-white stroke-[3]"></i>}
+                                        </button>
+                                        <div className="flex flex-col">
+                                            <span className={`text-lg ${goal.enabled ? 'text-gray-900 dark:text-white font-medium' : 'text-gray-400'}`}>
+                                                {goal.label}
+                                            </span>
+                                        </div>
                                     </div>
-                                    <div className="h-2 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
-                                        <div className={`h-full ${THEMES[settings.theme].bg} transition-all duration-1000`} style={{ width: `${progress}%` }} />
+                                    <div className="text-gray-500 dark:text-gray-400 font-normal">
+                                        {goal.target} <span className="text-sm">{goal.unit}</span>
                                     </div>
                                 </div>
-                            );
-                        })}
+                            </div>
+                        ))}
                     </div>
+                    <p className="px-4 mt-4 text-xs text-gray-500">
+                        Checked goals will appear on your Today dashboard.
+                    </p>
                 </div>
             );
         };
 
-        // --- SPREADSHEET HISTORY ---
-        const History = ({ entries, refresh, settings }) => {
-            const [editMode, setEditMode] = useState(false);
+        // --- TAB: HISTORY (Spreadsheet) ---
+        const HistoryTab = ({ theme, unit }) => {
+            const [entries, setEntries] = useState([]);
+            const [isEditing, setIsEditing] = useState(false);
+            const [sortDesc, setSortDesc] = useState(true);
 
-            const update = async (date, key, val) => {
-                await db.entries.update(date, { [key]: parseFloat(val) || 0 });
-                refresh();
+            useEffect(() => { loadEntries(); }, [sortDesc]);
+
+            const loadEntries = async () => {
+                let data = await db.entries.toArray();
+                data.sort((a, b) => sortDesc ? new Date(b.date) - new Date(a.date) : new Date(a.date) - new Date(b.date));
+                setEntries(data);
             };
 
-            const remove = async (date) => {
-                if(confirm('Delete entry?')) { await db.entries.delete(date); refresh(); }
+            const updateEntry = async (date, field, value) => {
+                // If date changes, we need to delete old key and add new one
+                if (field === 'date') {
+                    const oldEntry = entries.find(e => e.date === date);
+                    if (!oldEntry) return;
+                    await db.entries.delete(date); // Delete old key
+                    await db.entries.put({ ...oldEntry, date: value }); // Add new key
+                } else {
+                    await db.entries.update(date, { [field]: value });
+                }
+                loadEntries();
+            };
+
+            const deleteEntry = async (date) => {
+                await db.entries.delete(date);
+                loadEntries();
+            };
+
+            const addRow = async () => {
+                const today = formatDate(new Date());
+                // Simple logic to avoid duplicate key error if today exists: append a random string or check existence
+                // For simplicity, we assume user adds distinct dates or handles overwrite
+                await db.entries.put({ date: today, weight: '', bodyFat: '' });
+                loadEntries();
             };
 
             return (
-                <div className="flex flex-col h-full bg-white dark:bg-[#1C1C1E] rounded-3xl overflow-hidden shadow-xl">
-                    <div className="p-4 flex justify-between items-center border-b dark:border-gray-800">
-                        <span className="font-bold">Journal Spreadsheet</span>
-                        <button onClick={() => setEditMode(!editMode)} className={`p-2 rounded-full ${editMode ? THEMES[settings.theme].bg + ' text-white' : 'bg-gray-100 dark:bg-gray-800'}`}>
-                            <i data-lucide={editMode ? 'check' : 'edit-3'} className="w-5 h-5"></i>
+                <div className="h-full pt-safe pb-nav flex flex-col bg-white dark:bg-black">
+                    <div className="px-4 py-4 flex justify-between items-end bg-white/90 dark:bg-black/90 backdrop-blur-sm z-10 sticky top-0">
+                        <div>
+                             <h1 className="text-3xl font-bold dark:text-white">History</h1>
+                             <button onClick={() => setSortDesc(!sortDesc)} className="text-xs font-semibold text-gray-400 mt-1 uppercase flex items-center gap-1">
+                                Sort: {sortDesc ? 'Newest' : 'Oldest'} <i data-lucide="arrow-up-down" className="w-3 h-3"></i>
+                             </button>
+                        </div>
+                        <button 
+                            onClick={() => setIsEditing(!isEditing)}
+                            className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${isEditing ? `${THEMES[theme].primary} text-white shadow-lg` : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300'}`}
+                        >
+                            <i data-lucide={isEditing ? "check" : "pencil"} className="w-5 h-5"></i>
                         </button>
                     </div>
-                    <div className="flex-1 overflow-auto">
-                        <table className="w-full text-sm">
-                            <thead className="sticky top-0 bg-gray-50 dark:bg-black z-10">
+
+                    <div className="flex-1 overflow-auto relative">
+                        <table className="w-full text-left border-collapse">
+                            <thead className="bg-gray-50 dark:bg-[#1C1C1E] text-gray-500 dark:text-gray-400 text-xs uppercase tracking-wider sticky top-0 z-20 shadow-sm">
                                 <tr>
-                                    {editMode && <th className="p-3 w-10"></th>}
-                                    <th className="p-3 text-left">Date</th>
-                                    {METRICS.map(m => <th key={m.key} className="p-3 text-right">{m.label}</th>)}
+                                    <th className={`w-10 pl-4 py-3 transition-all ${!isEditing && 'w-0 overflow-hidden pl-0 opacity-0'}`}></th>
+                                    <th className="px-4 py-3 font-semibold">Date</th>
+                                    <th className="px-4 py-3 font-semibold text-right">Weight <span className="lowercase">({unit})</span></th>
+                                    <th className="px-4 py-3 font-semibold text-right">Body Fat %</th>
                                 </tr>
                             </thead>
-                            <tbody>
-                                {entries.map(e => (
-                                    <tr key={e.date}>
-                                        {editMode && <td className="p-3"><button onClick={() => remove(e.date)} className="text-red-500"><i data-lucide="minus-circle" className="w-5 h-5"></i></button></td>}
-                                        <td className="p-3 whitespace-nowrap font-medium">{e.date}</td>
-                                        {METRICS.map(m => (
-                                            <td key={m.key} className="p-0 border-l dark:border-gray-800">
-                                                {editMode ? (
-                                                    <input type="number" defaultValue={e[m.key]} onBlur={(evt) => update(e.date, m.key, evt.target.value)} className="w-full p-3 text-right bg-transparent outline-none focus:bg-blue-50 dark:focus:bg-blue-900/20" />
-                                                ) : (
-                                                    <div className="p-3 text-right">{e[m.key] || '-'}</div>
-                                                )}
-                                            </td>
-                                        ))}
+                            <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                                {entries.map((row) => (
+                                    <tr key={row.date} className="group bg-white dark:bg-black">
+                                        <td className={`pl-4 py-3 align-middle transition-all ${!isEditing ? 'hidden' : ''}`}>
+                                            <button onClick={() => deleteEntry(row.date)} className="w-6 h-6 bg-red-500 rounded-full flex items-center justify-center text-white shadow active:scale-90 transition-transform">
+                                                <i data-lucide="minus" className="w-4 h-4"></i>
+                                            </button>
+                                        </td>
+                                        <td className="px-4 py-3">
+                                            {isEditing ? (
+                                                <input 
+                                                    type="date" 
+                                                    value={row.date} 
+                                                    onChange={(e) => updateEntry(row.date, 'date', e.target.value)}
+                                                    className="w-full bg-transparent outline-none dark:text-white text-left font-mono text-sm"
+                                                />
+                                            ) : (
+                                                <span className="font-medium text-gray-900 dark:text-white text-sm">{row.date}</span>
+                                            )}
+                                        </td>
+                                        <td className="px-4 py-3 text-right">
+                                            {isEditing ? (
+                                                <input 
+                                                    type="number" inputMode="decimal" step="0.1"
+                                                    value={row.weight}
+                                                    onChange={(e) => updateEntry(row.date, 'weight', e.target.value)}
+                                                    className="w-full bg-blue-50 dark:bg-blue-900/20 rounded px-2 py-1 text-right outline-none dark:text-white"
+                                                />
+                                            ) : (
+                                                <span className="text-gray-600 dark:text-gray-300">{row.weight || '-'}</span>
+                                            )}
+                                        </td>
+                                        <td className="px-4 py-3 text-right">
+                                            {isEditing ? (
+                                                <input 
+                                                    type="number" inputMode="decimal" step="0.1"
+                                                    value={row.bodyFat}
+                                                    onChange={(e) => updateEntry(row.date, 'bodyFat', e.target.value)}
+                                                    className="w-full bg-blue-50 dark:bg-blue-900/20 rounded px-2 py-1 text-right outline-none dark:text-white"
+                                                />
+                                            ) : (
+                                                <span className="text-gray-600 dark:text-gray-300">{row.bodyFat || '-'}</span>
+                                            )}
+                                        </td>
                                     </tr>
                                 ))}
                             </tbody>
                         </table>
                     </div>
+
+                    {/* Floating Add Row Button (Only visible in edit mode) */}
+                    <AnimatePresence>
+                        {isEditing && (
+                            <motion.button
+                                initial={{ scale: 0, opacity: 0 }}
+                                animate={{ scale: 1, opacity: 1 }}
+                                exit={{ scale: 0, opacity: 0 }}
+                                onClick={addRow}
+                                className={`absolute bottom-6 left-6 w-12 h-12 rounded-full ${THEMES[theme].primary} text-white shadow-xl flex items-center justify-center z-30`}
+                            >
+                                <i data-lucide="plus" className="w-6 h-6"></i>
+                            </motion.button>
+                        )}
+                    </AnimatePresence>
                 </div>
             );
         };
 
-        // --- GOALS TAB ---
-        const Goals = ({ active, toggle, settings }) => (
-            <div className="space-y-4">
-                <h1 className="text-3xl font-bold mb-6">Tracked Goals</h1>
-                <div className="bg-white dark:bg-[#1C1C1E] rounded-3xl divide-y dark:divide-gray-800 overflow-hidden shadow-sm">
-                    {METRICS.map(m => (
-                        <div key={m.key} onClick={() => toggle(m.key)} className="flex items-center p-5 active:bg-gray-50 dark:active:bg-gray-800 transition-colors">
-                            <div className={`w-6 h-6 rounded-full border-2 mr-4 flex items-center justify-center ${active.includes(m.key) ? THEMES[settings.theme].bg + ' border-transparent' : 'border-gray-300'}`}>
-                                {active.includes(m.key) && <i data-lucide="check" className="w-4 h-4 text-white"></i>}
-                            </div>
-                            <span className={`text-lg ${active.includes(m.key) ? 'font-semibold' : 'text-gray-400'}`}>{m.label}</span>
-                            <span className="ml-auto text-gray-400 font-mono text-sm">{m.target} {m.unit}</span>
-                        </div>
-                    ))}
-                </div>
-            </div>
-        );
+        // --- TAB: SETTINGS ---
+        const SettingsTab = ({ settings, setSettings, theme }) => {
+            const update = (key, val) => {
+                const newS = { ...settings, [key]: val };
+                setSettings(newS);
+                db.settings.put({ key: 'config', val: newS });
+            };
 
-        // --- SETTINGS ---
-        const Settings = ({ settings, setSettings }) => (
-            <div className="space-y-8">
-                <h1 className="text-3xl font-bold">Preferences</h1>
-                <div className="bg-white dark:bg-[#1C1C1E] rounded-2xl p-6 space-y-6 shadow-sm">
-                    <div className="flex justify-between items-center">
-                        <span>Theme Color</span>
-                        <div className="flex gap-3">
-                            {['blue', 'green', 'monochrome'].map(t => (
-                                <button key={t} onClick={() => setSettings({...settings, theme: t})} className={`w-8 h-8 rounded-full ${THEMES[t].bg} ${settings.theme === t ? 'ring-4 ring-gray-300' : ''}`} />
-                            ))}
-                        </div>
-                    </div>
-                    <div className="flex justify-between items-center">
-                        <span>Appearance</span>
-                        <select value={settings.mode} onChange={e => setSettings({...settings, mode: e.target.value})} className="bg-gray-100 dark:bg-black p-2 rounded-lg outline-none">
-                            <option value="light">Light</option>
-                            <option value="dark">Dark</option>
-                        </select>
-                    </div>
-                </div>
-            </div>
-        );
-
-        // --- NEW ENTRY MODAL ---
-        const EntryModal = ({ close, theme }) => {
-            const [vals, setVals] = useState({ date: new Date().toISOString().split('T')[0] });
             return (
-                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[100] bg-black/50 flex items-end">
-                    <motion.div initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} className="w-full bg-white dark:bg-[#1C1C1E] rounded-t-[32px] p-8 pb-12 shadow-2xl overflow-y-auto max-h-[90vh]">
-                        <div className="w-12 h-1.5 bg-gray-300 rounded-full mx-auto mb-8" />
-                        <h2 className="text-2xl font-bold text-center mb-8">Daily Journal</h2>
-                        <div className="grid gap-4 mb-8">
-                            <input type="date" value={vals.date} onChange={e => setVals({...vals, date: e.target.value})} className="p-4 bg-gray-50 dark:bg-black rounded-xl w-full font-bold text-center" />
-                            {METRICS.map(m => (
-                                <div key={m.key} className="flex items-center bg-gray-50 dark:bg-black p-4 rounded-xl">
-                                    <label className="flex-1 font-medium">{m.label}</label>
-                                    <input type="number" placeholder="0" onChange={e => setVals({...vals, [m.key]: parseFloat(e.target.value) || 0})} className="bg-transparent text-right w-24 font-bold outline-none" />
-                                    <span className="ml-2 text-gray-400 text-xs">{m.unit}</span>
+                <div className="h-full pt-safe pb-nav px-4 bg-[#F2F2F7] dark:bg-black overflow-y-auto">
+                    <h1 className="text-3xl font-bold dark:text-white mb-6 mt-4 px-2">Settings</h1>
+
+                    <div className="space-y-6">
+                        {/* Appearance */}
+                        <section>
+                            <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 pl-2">Appearance</h3>
+                            <div className="bg-white dark:bg-[#1C1C1E] rounded-xl overflow-hidden shadow-sm">
+                                <div className="p-4 flex items-center justify-between border-b border-gray-100 dark:border-gray-800">
+                                    <span className="dark:text-white">Dark Mode</span>
+                                    <select 
+                                        value={settings.mode}
+                                        onChange={(e) => update('mode', e.target.value)}
+                                        className="bg-gray-100 dark:bg-black text-gray-800 dark:text-gray-200 text-sm rounded-lg px-3 py-1.5 outline-none border-none"
+                                    >
+                                        <option value="auto">Auto</option>
+                                        <option value="light">Light</option>
+                                        <option value="dark">Dark</option>
+                                    </select>
                                 </div>
-                            ))}
-                        </div>
-                        <button onClick={() => { db.entries.put(vals); close(true); }} className={`w-full p-4 rounded-2xl text-white font-bold text-lg shadow-lg ${THEMES[theme].bg}`}>Save Entry</button>
-                        <button onClick={() => close(false)} className="w-full mt-4 p-2 text-gray-400">Cancel</button>
-                    </motion.div>
-                </motion.div>
+                                <div className="p-4 flex items-center justify-between">
+                                    <span className="dark:text-white">Theme Color</span>
+                                    <div className="flex space-x-3">
+                                        {Object.values(THEMES).map(t => (
+                                            <button 
+                                                key={t.id}
+                                                onClick={() => update('theme', t.id)}
+                                                className={`w-6 h-6 rounded-full ${t.primary} ring-offset-2 dark:ring-offset-[#1C1C1E] transition-all ${settings.theme === t.id ? `ring-2 ${t.ring}` : ''}`}
+                                            />
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+                        </section>
+
+                        {/* Units */}
+                        <section>
+                            <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 pl-2">Units</h3>
+                            <div className="bg-white dark:bg-[#1C1C1E] rounded-xl overflow-hidden shadow-sm p-4 flex justify-between items-center">
+                                <span className="dark:text-white">System</span>
+                                <div className="bg-gray-100 dark:bg-black p-1 rounded-lg flex text-xs font-bold">
+                                    <button 
+                                        onClick={() => update('unit', 'imperial')}
+                                        className={`px-4 py-1.5 rounded-md transition-all ${settings.unit === 'imperial' ? 'bg-white dark:bg-[#2C2C2E] text-black dark:text-white shadow-sm' : 'text-gray-400'}`}
+                                    >
+                                        Imperial
+                                    </button>
+                                    <button 
+                                        onClick={() => update('unit', 'metric')}
+                                        className={`px-4 py-1.5 rounded-md transition-all ${settings.unit === 'metric' ? 'bg-white dark:bg-[#2C2C2E] text-black dark:text-white shadow-sm' : 'text-gray-400'}`}
+                                    >
+                                        Metric
+                                    </button>
+                                </div>
+                            </div>
+                        </section>
+                    </div>
+                </div>
             );
         };
+
+        // --- COMPONENT: ADD ENTRY MODAL ---
+        const EntryModal = ({ close, theme, unit }) => {
+            const [data, setData] = useState({ 
+                weight: '', 
+                bodyFat: '',
+                date: formatDate(new Date()) 
+            });
+
+            const save = async () => {
+                await db.entries.put(data);
+                close(true);
+            };
+
+            return (
+                <div className="fixed inset-0 z-50 flex flex-col justify-end">
+                    {/* Backdrop */}
+                    <motion.div 
+                        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                        className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+                        onClick={() => close(false)}
+                    />
+                    
+                    {/* Sheet */}
+                    <motion.div 
+                        initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
+                        transition={{ type: "spring", damping: 25, stiffness: 200 }}
+                        className="relative z-10 bg-white dark:bg-[#1C1C1E] rounded-t-[32px] p-6 pb-safe pt-4 shadow-2xl"
+                    >
+                        {/* Drag Handle */}
+                        <div className="w-12 h-1.5 bg-gray-300 dark:bg-gray-700 rounded-full mx-auto mb-6" />
+
+                        <div className="flex justify-between items-center mb-6">
+                            <h2 className="text-2xl font-bold dark:text-white">New Entry</h2>
+                            <input 
+                                type="date" 
+                                value={data.date} 
+                                onChange={e => setData({...data, date: e.target.value})}
+                                className="text-gray-500 dark:text-gray-400 bg-transparent outline-none"
+                            />
+                        </div>
+
+                        <div className="space-y-4 mb-8">
+                            <div className="bg-gray-50 dark:bg-black p-5 rounded-2xl flex items-center justify-between">
+                                <label className="text-sm font-bold text-gray-500 uppercase">Weight ({unit})</label>
+                                <input 
+                                    type="number" inputMode="decimal" autoFocus
+                                    placeholder="0.0"
+                                    value={data.weight}
+                                    onChange={e => setData({...data, weight: e.target.value})}
+                                    className="bg-transparent text-right text-3xl font-light outline-none dark:text-white w-32"
+                                />
+                            </div>
+                            <div className="bg-gray-50 dark:bg-black p-5 rounded-2xl flex items-center justify-between">
+                                <label className="text-sm font-bold text-gray-500 uppercase">Body Fat %</label>
+                                <input 
+                                    type="number" inputMode="decimal"
+                                    placeholder="0.0"
+                                    value={data.bodyFat}
+                                    onChange={e => setData({...data, bodyFat: e.target.value})}
+                                    className="bg-transparent text-right text-3xl font-light outline-none dark:text-white w-32"
+                                />
+                            </div>
+                        </div>
+
+                        <button 
+                            onClick={save}
+                            className={`w-full py-4 rounded-xl font-bold text-white text-lg shadow-lg active:scale-[0.98] transition-transform ${THEMES[theme].primary}`}
+                        >
+                            Save Log
+                        </button>
+                    </motion.div>
+                </div>
+            );
+        };
+
+        // --- MAIN APP ---
+        const App = () => {
+            const [activeTab, setActiveTab] = useState('today');
+            const [prevTab, setPrevTab] = useState('today');
+            const [showModal, setShowModal] = useState(false);
+            const [latestEntry, setLatestEntry] = useState(null);
+
+            // App State
+            const [settings, setSettings] = useState({ theme: 'monochrome', unit: 'imperial', mode: 'auto' });
+            const [goals, setGoals] = useState([
+                { id: 1, label: 'Weight', key: 'weight', target: 170, unit: 'lbs', enabled: true },
+                { id: 2, label: 'Body Fat', key: 'bodyFat', target: 15, unit: '%', enabled: true }
+            ]);
+
+            // Tabs config for Order
+            const tabsOrder = ['today', 'trends', 'goals', 'history', 'settings'];
+            
+            // Initialization
+            useEffect(() => {
+                const init = async () => {
+                    const s = await db.settings.get('config');
+                    if (s) setSettings(s.val);
+                    
+                    const g = await db.goals.toArray();
+                    if (g.length) setGoals(g);
+                    else await db.goals.bulkPut(goals);
+
+                    await refreshData();
+                };
+                init();
+            }, []);
+
+            // Effect: Theme Application
+            useEffect(() => {
+                const applyMode = () => {
+                    if (settings.mode === 'dark' || (settings.mode === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+                        document.documentElement.classList.add('dark');
+                    } else {
+                        document.documentElement.classList.remove('dark');
+                    }
+                };
+                applyMode();
+                window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyMode);
+                return () => window.matchMedia('(prefers-color-scheme: dark)').removeEventListener('change', applyMode);
+            }, [settings.mode]);
+
+            // Effect: Update Goal Units
+            useEffect(() => {
+                const updated = goals.map(g => g.key === 'weight' ? { ...g, unit: settings.unit === 'imperial' ? 'lbs' : 'kg' } : g);
+                if (JSON.stringify(updated) !== JSON.stringify(goals)) {
+                    setGoals(updated);
+                    db.goals.bulkPut(updated);
+                }
+            }, [settings.unit]);
+
+            const refreshData = async () => {
+                const last = await db.entries.orderBy('date').last();
+                setLatestEntry(last);
+            };
+
+            const switchTab = (tab) => {
+                setPrevTab(activeTab);
+                setActiveTab(tab);
+            };
+
+            const toggleGoal = (id) => {
+                const newGoals = goals.map(g => g.id === id ? { ...g, enabled: !g.enabled } : g);
+                setGoals(newGoals);
+                db.goals.bulkPut(newGoals);
+            };
+
+            // Animation Variants
+            const direction = tabsOrder.indexOf(activeTab) > tabsOrder.indexOf(prevTab) ? 1 : -1;
+            const variants = {
+                enter: (dir) => ({ x: dir > 0 ? '100%' : '-100%' }),
+                center: { x: 0 },
+                exit: (dir) => ({ x: dir > 0 ? '-25%' : '25%' }) // Parallax effect
+            };
+
+            useEffect(() => { lucide.createIcons(); }, [activeTab]);
+
+            return (
+                <div className={`h-[100dvh] w-screen overflow-hidden flex flex-col ${THEMES[settings.theme].text.replace('text-', 'selection:bg-')}`}>
+                    
+                    {/* Main Content Area */}
+                    <div className="flex-1 relative bg-[#F2F2F7] dark:bg-black">
+                        <AnimatePresence initial={false} custom={direction}>
+                            <motion.div
+                                key={activeTab}
+                                custom={direction}
+                                variants={variants}
+                                initial="enter"
+                                animate="center"
+                                exit="exit"
+                                transition={{ type: "tween", ease: "circOut", duration: 0.3 }}
+                                className="absolute inset-0 w-full h-full bg-[#F2F2F7] dark:bg-black shadow-2xl"
+                            >
+                                {activeTab === 'today' && <TodayTab goals={goals} latestEntry={latestEntry} theme={settings.theme} />}
+                                {activeTab === 'trends' && <TrendsTab />}
+                                {activeTab === 'goals' && <GoalsTab goals={goals} toggleGoal={toggleGoal} theme={settings.theme} />}
+                                {activeTab === 'history' && <HistoryTab theme={settings.theme} unit={settings.unit} />}
+                                {activeTab === 'settings' && <SettingsTab settings={settings} setSettings={setSettings} theme={settings.theme} />}
+                            </motion.div>
+                        </AnimatePresence>
+                    </div>
+
+                    {/* Bottom Navigation */}
+                    <nav className="fixed bottom-0 left-0 right-0 glass z-40 pb-safe pt-2 border-t border-gray-200 dark:border-gray-800">
+                        <div className="flex justify-around items-end h-[60px]">
+                            <NavIcon id="today" icon="layout-dashboard" label="Today" active={activeTab} set={switchTab} theme={settings.theme} />
+                            <NavIcon id="trends" icon="activity" label="Trends" active={activeTab} set={switchTab} theme={settings.theme} />
+                            
+                            {/* Spacer for FAB */}
+                            <div className="w-16"></div>
+
+                            <NavIcon id="goals" icon="target" label="Goals" active={activeTab} set={switchTab} theme={settings.theme} />
+                            <NavIcon id="history" icon="table-2" label="History" active={activeTab} set={switchTab} theme={settings.theme} />
+                        </div>
+                    </nav>
+                    
+                    {/* Settings Icon (Absolute Positioned for Layout balance) */}
+                    <button 
+                        onClick={() => switchTab('settings')}
+                        className={`fixed bottom-0 right-4 z-50 pb-safe mb-3 transition-colors ${activeTab === 'settings' ? THEMES[settings.theme].activeIcon : 'text-gray-400'}`}
+                    >
+                         <i data-lucide="settings-2" className="w-6 h-6"></i>
+                    </button>
+
+                    {/* FAB (Floating Action Button) */}
+                    <AnimatePresence>
+                        {activeTab !== 'settings' && (
+                            <motion.div
+                                initial={{ y: 100 }} animate={{ y: 0 }} exit={{ y: 100 }}
+                                className="fixed bottom-0 left-0 right-0 z-50 flex justify-center pb-safe pointer-events-none"
+                            >
+                                <motion.button
+                                    whileTap={{ scale: 0.9 }}
+                                    onClick={() => setShowModal(true)}
+                                    className={`mb-6 pointer-events-auto w-14 h-14 rounded-full ${THEMES[settings.theme].primary} text-white shadow-lg shadow-black/20 flex items-center justify-center border-4 border-[#F2F2F7] dark:border-black`}
+                                >
+                                    <i data-lucide="plus" className="w-8 h-8"></i>
+                                </motion.button>
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
+
+                    {/* Entry Modal */}
+                    <AnimatePresence>
+                        {showModal && (
+                            <EntryModal 
+                                close={(refresh) => { setShowModal(false); if(refresh) refreshData(); }} 
+                                theme={settings.theme}
+                                unit={settings.unit}
+                            />
+                        )}
+                    </AnimatePresence>
+                </div>
+            );
+        };
+
+        const NavIcon = ({ id, icon, label, active, set, theme }) => (
+            <button 
+                onClick={() => set(id)} 
+                className={`flex flex-col items-center justify-center w-16 h-full transition-colors ${active === id ? THEMES[theme].activeIcon : 'text-gray-400'}`}
+            >
+                <i data-lucide={icon} className="w-6 h-6 mb-1"></i>
+                <span className="text-[10px] font-medium">{label}</span>
+            </button>
+        );
 
         const root = ReactDOM.createRoot(document.getElementById('root'));
         root.render(<App />);
+    </script>
+    
+    <script>
+        // Init Service Worker
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./sw.js').catch(err => console.log('SW fail', err));
+            });
+        }
     </script>
 </body>
 </html>
