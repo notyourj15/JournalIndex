@@ -1,3 +1,4 @@
+/* ────────────────────── sw.js ────────────────────── */
 const CACHE_NAME = 'health-os-v2';
 const ASSETS = [
   './',
@@ -26,5 +27,5 @@ self.addEventListener('fetch', (event) => {
     caches.match(event.request).then((response) => {
       return response || fetch(event.request);
     })
-  );
-});
+  );               // <-- closes respondWith()
+});                 // <-- closes addEventListener
