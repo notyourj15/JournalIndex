@@ -1,11 +1,11 @@
-const CACHE_NAME = 'health-os-v5';
+const CACHE_NAME = 'health-os-v4';
 const ASSETS = [
   './',
   './index.html',
   'https://cdn.tailwindcss.com',
   'https://unpkg.com/react@18/umd/react.production.min.js',
   'https://unpkg.com/react-dom@18/umd/react-dom.production.min.js',
-  'https://unpkg.com/@babel/standalone/babel.min.js',
+  'https://unpkg.com/babel-standalone@6/babel.min.js',
   'https://unpkg.com/dexie@3/dist/dexie.min.js',
   'https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js',
   'https://unpkg.com/lucide@latest',
