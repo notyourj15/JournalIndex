@@ -1,3 +1,9 @@
+// Framer Motion safety fallback
+const MotionLib = window.Motion || { 
+    motion: { div: 'div', button: 'button' }, 
+    AnimatePresence: ({children}) => children 
+};
+const { motion, AnimatePresence } = MotionLib;
 const App = () => {
     const [tab, setTab] = React.useState('today');
     const [prevTab, setPrevTab] = React.useState('today');

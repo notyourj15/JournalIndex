@@ -49,7 +49,7 @@ const EntryModal = ({ close, theme, unit, latest }) => {
     };
 
     return (
-        <MotionLib.motion.div initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} transition={{ type: "spring", damping: 25 }}
+        <motion.div initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} transition={{ type: "spring", damping: 25 }}
             className="fixed inset-x-0 bottom-0 top-12 z-50 bg-white dark:bg-[#1C1C1E] rounded-t-[32px] flex flex-col shadow-2xl">
             <div className="flex justify-between items-center p-6 border-b border-gray-100 dark:border-gray-800">
                 <button onClick={() => close(false)} className="text-gray-400 font-medium">Cancel</button>
@@ -76,14 +76,14 @@ const EntryModal = ({ close, theme, unit, latest }) => {
                     </div>
                 ))}
             </div>
-            <MotionLib.AnimatePresence>
+            <AnimatePresence>
                 {showSuccess && (
-                    <MotionLib.motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} exit={{ scale: 0 }} className="absolute inset-0 flex items-center justify-center z-60 bg-green-500/50">
+                    <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} exit={{ scale: 0 }} className="absolute inset-0 flex items-center justify-center z-60 bg-green-500/50">
                         <i data-lucide="check-circle" className="w-20 h-20 text-white"></i>
-                    </MotionLib.motion.div>
+                    </motion.div>
                 )}
-            </MotionLib.AnimatePresence>
-        </MotionLib.motion.div>
+            </AnimatePresence>
+        </motion.div>
     );
 };
 window.EntryModal = EntryModal;
