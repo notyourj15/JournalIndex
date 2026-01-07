@@ -16,6 +16,7 @@
     <script src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
     
     <script src="https://unpkg.com/dexie@3/dist/dexie.min.js"></script>
+    
     <script src="https://unpkg.com/lucide@latest"></script>
     
     <script src="https://unpkg.com/framer-motion@10.16.4/dist/framer-motion.js"></script>
@@ -26,22 +27,27 @@
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1"></script>
 
     <style>
+        /* iOS Safe Area Variables */
         :root {
             --sat: env(safe-area-inset-top);
             --sab: env(safe-area-inset-bottom);
         }
+
+        /* Base Reset */
         body { 
             font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif;
             background-color: #F2F2F7;
             -webkit-tap-highlight-color: transparent;
-            overscroll-behavior-y: none;
+            overscroll-behavior-y: none; /* Prevents pull-to-refresh on iOS PWA */
         }
         .dark body { background-color: #000000; }
         
+        /* Layout Utilities */
         .pt-safe { padding-top: max(20px, var(--sat)); }
         .pb-safe { padding-bottom: max(20px, var(--sab)); }
-        .h-dvh { height: 100dvh; }
+        .h-dvh { height: 100dvh; } /* Dynamic viewport height */
         
+        /* Glassmorphism Effect */
         .glass {
             background: rgba(255, 255, 255, 0.85);
             backdrop-filter: blur(20px);
@@ -53,15 +59,18 @@
             border-top: 0.5px solid rgba(255,255,255,0.15);
         }
         
+        /* Utility: Hide Scrollbars */
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
         
+        /* Spreadsheet Sticky Headers/Columns */
         .sticky-col { position: sticky; left: 0; z-index: 20; }
         .sticky-head { position: sticky; top: 0; z-index: 30; }
         .sticky-corner { position: sticky; top: 0; left: 0; z-index: 40; }
     </style>
     
     <script>
+        // Tailwind Configuration
         tailwind.config = {
             darkMode: 'class',
             theme: {
@@ -78,26 +87,25 @@
     <div id="root"></div>
 
     <script type="text/babel">
+        // ============================================
+        // 1. INITIALIZATION & CONSTANTS
+        // ============================================
         const { useState, useEffect, useRef, useMemo, useCallback } = React;
         
-        // --- SAFE MOTION ACCESS ---
-        // Fallback object to prevent white-screen crash if CDN fails
+        // Safety check for Framer Motion to prevent crashes if CDN lags
         const MotionLib = window.Motion || { motion: { div: 'div', button: 'button' }, AnimatePresence: ({children}) => children };
         const { motion, AnimatePresence } = MotionLib;
 
-        // --- CHART.JS REGISTRATION ---
-        // Essential: Register plugins or the chart will crash on 'zoom' or 'annotation' keys
+        // Register Chart.js Plugins (CRITICAL: Fixes the chart crash)
         if (window.Chart) {
             try {
-                // In browser globals, these plugins are often attached to window['chartjs-plugin-zoom'] etc.
-                // or they auto-register. We try to register them to be safe.
                 Chart.register(window.ChartZoom, window['chartjs-plugin-annotation']); 
             } catch (e) {
-                console.warn("Chart plugin registration warning:", e);
+                console.warn("Plugins already registered or failed:", e);
             }
         }
 
-        // --- 1. CONFIGURATION ---
+        // --- THEME CONFIGURATION ---
         const THEMES = {
             monochrome: { id: 'monochrome', label: 'Noir', bg: 'bg-black dark:bg-white', text: 'text-black dark:text-white', accent: 'bg-black dark:bg-white text-white dark:text-black', icon: 'text-black dark:text-white' },
             ocean: { id: 'ocean', label: 'Ocean', bg: 'bg-blue-600', text: 'text-blue-600', accent: 'bg-blue-500 text-white', icon: 'text-blue-500' },
@@ -107,21 +115,27 @@
             rose: { id: 'rose', label: 'Rose', bg: 'bg-rose-300', text: 'text-rose-400', accent: 'bg-rose-300 text-white', icon: 'text-rose-400' },
         };
 
+        // --- METRICS CONFIGURATION ---
+        // Defines the type of data, labels, and if they are user-inputtable or calculated
         const METRICS = {
             weight: { label: 'Weight', unitType: 'mass', input: true },
-            bmi: { label: 'BMI', unitType: 'index', input: false },
+            bmi: { label: 'BMI', unitType: 'index', input: false }, // Calculated
             bodyFat: { label: 'Body Fat', unitType: 'percent', input: true },
-            fatMass: { label: 'Fat Mass', unitType: 'mass', input: false },
-            leanMass: { label: 'Fat Free Mass', unitType: 'mass', input: false },
+            fatMass: { label: 'Fat Mass', unitType: 'mass', input: false }, // Calculated
+            leanMass: { label: 'Fat Free Mass', unitType: 'mass', input: false }, // Calculated
             visceralFat: { label: 'Visceral Fat', unitType: 'index', input: true },
             bodyWater: { label: 'Body Water', unitType: 'percent', input: true },
             skeletalMuscle: { label: 'Skeletal Muscle', unitType: 'percent', input: true },
-            muscleMass: { label: 'Muscle Mass', unitType: 'mass', input: false },
+            muscleMass: { label: 'Muscle Mass', unitType: 'mass', input: false }, // Calculated
             boneMass: { label: 'Bone Mass', unitType: 'mass', input: true },
             bmr: { label: 'BMR', unitType: 'cal', input: true },
         };
 
-        // --- 2. DATABASE ---
+        // ============================================
+        // 2. DATABASE & UTILITIES
+        // ============================================
+        
+        // Dexie.js Database Definition
         const db = new Dexie('HealthOS_Pro_V1');
         db.version(1).stores({
             entries: 'date', 
@@ -129,11 +143,13 @@
             goals: 'id'
         });
 
-        // --- 3. UTILS & CONVERSIONS ---
+        // Conversion Helpers
         const convert = (val, type, toUnit) => {
             if (val === null || val === undefined || isNaN(val)) return 0;
             const num = parseFloat(val);
             if (type === 'percent' || type === 'index' || type === 'cal') return num;
+            
+            // Convert KG -> LBS if imperial
             if (type === 'mass') {
                 if (toUnit === 'imperial') return num * 2.20462; 
                 return num; 
@@ -141,9 +157,11 @@
             return num;
         };
 
+        // Input Helpers (Convert Display Unit -> Storage Unit)
         const fromInput = (val, type, currentUnit) => {
             if (!val) return null;
             const num = parseFloat(val);
+            // Convert LBS -> KG for storage if imperial
             if (type === 'mass' && currentUnit === 'imperial') return num / 2.20462;
             return num;
         };
@@ -162,24 +180,22 @@
             return unit === 'imperial' ? 'lbs' : 'kg';
         };
 
-        // --- 4. COMPONENTS ---
+        // ============================================
+        // 3. REACT COMPONENTS
+        // ============================================
 
-        // ERROR BOUNDARY COMPONENT
+        // --- Error Boundary (Prevent total app crash) ---
         class ErrorBoundary extends React.Component {
-            constructor(props) {
-                super(props);
-                this.state = { hasError: false };
-            }
+            constructor(props) { super(props); this.state = { hasError: false }; }
             static getDerivedStateFromError(error) { return { hasError: true }; }
-            componentDidCatch(error, errorInfo) { console.error("React Error:", error, errorInfo); }
+            componentDidCatch(error, errorInfo) { console.error("HealthOS Error:", error, errorInfo); }
             render() {
-                if (this.state.hasError) {
-                    return <div className="p-4 text-center text-red-500">Something went wrong. Reload the app.</div>;
-                }
+                if (this.state.hasError) return <div className="p-10 text-center text-gray-500">Something went wrong. Please refresh.</div>;
                 return this.props.children; 
             }
         }
 
+        // --- Tab: Dashboard (Today) ---
         const TodayTab = ({ goals, entries, theme, unit }) => {
             const sorted = useMemo(() => [...entries].sort((a,b) => new Date(a.date) - new Date(b.date)), [entries]);
             const first = sorted[0];
@@ -211,8 +227,7 @@
                                 const dispStart = convert(startVal, m.unitType, unit);
                                 
                                 const delta = dispCur - dispStart;
-                                // Simple goal progress logic
-                                const pct = (dispCur / goalVal) * 100;
+                                const pct = (dispCur / goalVal) * 100; // Simplified progress logic
 
                                 return (
                                     <div key={goal.id} className="bg-white dark:bg-[#1C1C1E] rounded-3xl p-5 shadow-sm">
@@ -253,6 +268,7 @@
             );
         };
 
+        // --- Tab: Trends (Chart.js) ---
         const TrendsTab = ({ entries, unit, theme }) => {
             const [activeKey, setActiveKey] = useState('weight');
             const canvasRef = useRef(null);
@@ -264,25 +280,20 @@
                 const ctx = canvasRef.current.getContext('2d');
                 if (chartRef.current) chartRef.current.destroy();
 
+                // Sort & Prepare Data
                 const sorted = [...entries].sort((a,b) => new Date(a.date) - new Date(b.date));
                 const labels = sorted.map(e => e.date);
                 const metric = METRICS[activeKey];
-                
                 const values = sorted.map(e => convert(e[activeKey], metric.unitType, unit));
                 
-                // Regression
+                // --- Simple Linear Regression for Prediction ---
                 const n = values.length;
                 let sumX = 0, sumY = 0, sumXY = 0, sumXX = 0;
-                values.forEach((y, x) => {
-                    sumX += x;
-                    sumY += y;
-                    sumXY += x * y;
-                    sumXX += x * x;
-                });
+                values.forEach((y, x) => { sumX += x; sumY += y; sumXY += x * y; sumXX += x * x; });
                 const slope = (n * sumXY - sumX * sumY) / (n * sumXX - sumX * sumX);
                 const intercept = (sumY - slope * sumX) / n;
                 
-                // Forecast
+                // Calculate Future Points (Next 7 days)
                 const futureLabels = [...labels];
                 const futureData = [...values];
                 const marginDataHigh = [...values];
@@ -302,6 +313,7 @@
 
                 const accentColor = window.matchMedia('(prefers-color-scheme: dark)').matches ? '#FFFFFF' : '#000000';
 
+                // Initialize Chart
                 try {
                     chartRef.current = new Chart(ctx, {
                         type: 'line',
@@ -332,7 +344,7 @@
                         }
                     });
                 } catch (err) {
-                    console.error("Chart Error:", err);
+                    console.error("Chart Render Failed:", err);
                 }
 
                 return () => chartRef.current?.destroy();
@@ -343,6 +355,7 @@
                     <div className="py-6">
                         <h1 className="text-3xl font-bold dark:text-white px-2">Trends</h1>
                     </div>
+                    {/* Metric Selector */}
                     <div className="flex overflow-x-auto no-scrollbar space-x-3 pb-4 px-2">
                         {Object.entries(METRICS).map(([key, m]) => (
                             <button key={key} onClick={() => setActiveKey(key)}
@@ -354,6 +367,7 @@
                             </button>
                         ))}
                     </div>
+                    {/* Canvas Container */}
                     <div className="flex-1 min-h-0 bg-gray-50 dark:bg-[#1C1C1E] rounded-3xl p-4 relative shadow-inner">
                         <canvas ref={canvasRef} />
                     </div>
@@ -364,6 +378,7 @@
             );
         };
 
+        // --- Tab: History (Spreadsheet) ---
         const HistoryTab = ({ entries, deleteEntry, theme, unit }) => {
             const sorted = useMemo(() => [...entries].sort((a,b) => new Date(b.date) - new Date(a.date)), [entries]);
 
@@ -410,6 +425,7 @@
             );
         };
 
+        // --- Tab: Goals (Checklist) ---
         const GoalsTab = ({ goals, toggleGoal, theme }) => (
             <div className="h-full pt-safe pb-24 flex flex-col bg-[#F2F2F7] dark:bg-black">
                 <div className="px-6 py-6">
@@ -432,6 +448,7 @@
             </div>
         );
 
+        // --- Tab: Settings ---
         const SettingsTab = ({ settings, setSettings, theme }) => {
             const update = (k, v) => {
                 const s = { ...settings, [k]: v };
@@ -469,9 +486,11 @@
             );
         };
 
+        // --- Component: Entry Modal (Slide Up) ---
         const EntryModal = ({ close, theme, unit, latest }) => {
             const [data, setData] = useState({ date: new Date().toISOString().split('T')[0] });
 
+            // Initialize form fields based on METRICS config
             useEffect(() => {
                 const init = {};
                 Object.keys(METRICS).forEach(k => {
@@ -484,13 +503,15 @@
 
             const save = async () => {
                 const entry = { date: data.date };
+                
+                // 1. Save inputs
                 Object.keys(METRICS).forEach(k => {
                     if (METRICS[k].input && data[k]) {
                         entry[k] = fromInput(data[k], METRICS[k].unitType, unit);
                     }
                 });
                 
-                // Basic Calcs
+                // 2. Perform Calculations (Metric Base)
                 const w = entry.weight;
                 const bf = entry.bodyFat;
                 if (w && bf) {
@@ -534,14 +555,20 @@
             );
         };
 
+        // ============================================
+        // 4. MAIN APP CONTROLLER
+        // ============================================
         const App = () => {
             const [tab, setTab] = useState('today');
             const [prevTab, setPrevTab] = useState('today');
             const [modal, setModal] = useState(false);
             const [entries, setEntries] = useState([]);
+            
+            // Persistent Settings
             const [settings, setSettings] = useState({ theme: 'monochrome', unit: 'imperial' });
             const [goals, setGoals] = useState(() => Object.keys(METRICS).map((k, i) => ({ id: i, key: k, label: METRICS[k].label, target: 0, enabled: k === 'weight' })));
 
+            // Initialization Effect
             useEffect(() => {
                 const init = async () => {
                     const s = await db.settings.get('config');
@@ -549,19 +576,20 @@
                     const g = await db.goals.toArray();
                     if (g.length) setGoals(g);
                     refresh();
-                    
-                    if (window.lucide) {
-                        lucide.createIcons();
-                    }
                 };
                 init();
-            }, [tab, modal]); // Re-run lucide on tab change
+            }, []);
 
+            // Icons & Dark Mode Sync
             useEffect(() => {
+                // Ensure icons render after DOM updates
+                if (window.lucide) lucide.createIcons();
+                
+                // Dark Mode Class
                 if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
                     document.documentElement.classList.add('dark');
                 }
-            }, []);
+            }, [tab, modal]);
 
             const refresh = async () => setEntries(await db.entries.toArray());
             const toggleGoal = async (id) => {
@@ -571,15 +599,20 @@
             };
 
             const switchTab = (t) => { setPrevTab(tab); setTab(t); };
+            
+            // Animation Direction Logic
             const direction = ['today', 'trends', 'goals', 'history', 'settings'].indexOf(tab) > ['today', 'trends', 'goals', 'history', 'settings'].indexOf(prevTab) ? 1 : -1;
 
             return (
                 <ErrorBoundary>
                     <div className={`h-dvh w-screen overflow-hidden flex flex-col ${THEMES[settings.theme].text.replace('text-', 'selection:bg-')}`}>
+                        
+                        {/* Header Action: Settings */}
                         <button onClick={() => switchTab('settings')} className="absolute top-4 right-6 z-50 p-2 rounded-full bg-gray-100/50 dark:bg-gray-800/50 backdrop-blur pt-safe">
                             <i data-lucide="settings-2" className="w-5 h-5 opacity-70"></i>
                         </button>
 
+                        {/* Main Content Area with Transitions */}
                         <div className="flex-1 relative bg-[#F2F2F7] dark:bg-black">
                             <AnimatePresence custom={direction} initial={false}>
                                 <motion.div key={tab} custom={direction} 
@@ -595,6 +628,7 @@
                             </AnimatePresence>
                         </div>
 
+                        {/* Floating Action Button (FAB) */}
                         <div className="fixed bottom-0 left-0 right-0 z-50 flex justify-center pointer-events-none pb-24">
                             <motion.button 
                                 animate={{ scale: tab === 'settings' ? 0.8 : 1, filter: tab === 'settings' ? 'grayscale(100%)' : 'none', opacity: tab === 'settings' ? 0.5 : 1 }}
@@ -604,6 +638,7 @@
                             </motion.button>
                         </div>
 
+                        {/* Bottom Navigation */}
                         <div className="fixed bottom-0 left-0 right-0 glass z-40 pb-safe pt-2 h-[88px] flex justify-around items-start border-t border-gray-200 dark:border-gray-800">
                             {['today', 'trends', 'goals', 'history'].map(id => (
                                 <button key={id} onClick={() => switchTab(id)} className={`flex flex-col items-center w-16 pt-2 ${tab === id ? THEMES[settings.theme].icon : 'text-gray-400'}`}>
@@ -613,6 +648,7 @@
                             ))}
                         </div>
 
+                        {/* Modals */}
                         <AnimatePresence>
                             {modal && (
                                 <>
