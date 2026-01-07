@@ -1,4 +1,4 @@
-const CACHE_NAME = 'healthos-pro-v1';
+const CACHE_NAME = 'healthos-pro-v1_1';
 const ASSETS = [
   './',
   './index.html',
