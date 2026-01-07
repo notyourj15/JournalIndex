@@ -94,29 +94,44 @@
         <div style="background:#f4f4f4; padding:15px; border-radius:8px; text-align:left; margin-bottom:20px;">
             <code id="error-code" style="font-family:monospace; font-size:12px; color:#d00; word-break:break-all;">CODE: UNKNOWN_FATAL_ERR</code>
         </div>
-        <button onclick="location.reload()" style="background:#000; color:#fff; border:none; padding:12px 24px; border-radius:8px; font-weight:bold; cursor:pointer;">Try Again</button>
+        <div style="display:flex; gap:10px; justify-content:center;">
+            <button onclick="location.reload()" style="background:#000; color:#fff; border:none; padding:12px 24px; border-radius:8px; font-weight:bold; cursor:pointer;">Try Again</button>
+            <button id="copy-err-btn" style="background:#e2e2e7; color:#000; border:none; padding:12px 24px; border-radius:8px; font-weight:bold; cursor:pointer;">Copy Full Error</button>
+        </div>
     </div>
 </div>
 
 <script>
-    // 1. CATCH SCRIPT LOAD FAILURES (CDN issues)
-    window.addEventListener('error', function(e) {
-        if (e.target.tagName === 'SCRIPT') {
-            showFatalError('RESOURCE_LOAD_FAIL', 'A critical library (' + e.target.src.split('/').pop() + ') failed to load. Check your internet connection.');
-        }
-    }, true);
-
-    // 2. CATCH RUNTIME CRASHES
-    window.onerror = function(msg, url, line) {
-        showFatalError('RUNTIME_EXCEPTION', msg + ' at line ' + line);
-        return false;
-    };
+    let lastError = "";
 
     function showFatalError(code, desc) {
+        lastError = `ID: ${code}\nDescription: ${desc}\nUserAgent: ${navigator.userAgent}\nTime: ${new Date().toISOString()}`;
         document.getElementById('fatal-error-screen').style.display = 'block';
         document.getElementById('error-code').innerText = 'ERROR_ID: ' + code;
         if(desc) document.getElementById('error-desc').innerText = desc;
     }
+
+    // 1. CATCH SCRIPT LOAD FAILURES
+    window.addEventListener('error', function(e) {
+        if (e.target.tagName === 'SCRIPT') {
+            showFatalError('RESOURCE_LOAD_FAIL', 'Failed to load: ' + e.target.src);
+        }
+    }, true);
+
+    // 2. CATCH RUNTIME CRASHES
+    window.onerror = function(msg, url, line, col, error) {
+        const detail = `${msg} | URL: ${url} | Line: ${line} | Col: ${col}`;
+        showFatalError('RUNTIME_EXCEPTION', detail);
+        return false;
+    };
+
+    // 3. COPY BUTTON LOGIC
+    document.getElementById('copy-err-btn').onclick = function() {
+        navigator.clipboard.writeText(lastError).then(() => {
+            this.innerText = "Copied!";
+            setTimeout(() => { this.innerText = "Copy Full Error"; }, 2000);
+        });
+    };
 </script>
 
     <div id="root"></div>
@@ -128,7 +143,7 @@
         const { useState, useEffect, useRef, useMemo, useCallback } = React;
         
         // Safety check for Framer Motion to prevent crashes if CDN lags
-        const MotionLib = window.Motion || { motion: { div: 'div', button: 'button' }, AnimatePresence: ({children}) => children };
+        const MotionLib = window.FramerMotion || { motion: { div: 'div', button: 'button' }, AnimatePresence: ({children}) => children };
         const { motion, AnimatePresence } = MotionLib;
 
         // Register Chart.js Plugins (CRITICAL: Fixes the chart crash)
