@@ -3,13 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Body Journal</title>
+    <title>HealthOS</title>
     
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="apple-mobile-web-app-title" content="Journal">
-    <link rel="apple-touch-icon" href="https://img.icons8.com/ios-filled/180/4a90e2/scale-tool.png">
-
+    
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
@@ -17,279 +15,581 @@
     <script src="https://unpkg.com/dexie@3/dist/dexie.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://unpkg.com/framer-motion@10.16.4/dist/framer-motion.js"></script>
 
     <style>
-        /* Custom "Paper" Aesthetic & Animations */
-        body { background-color: #F5F5F7; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; -webkit-tap-highlight-color: transparent; }
-        .tabular-nums { font-variant-numeric: tabular-nums; }
+        /* Base Setup */
+        :root { --safe-top: env(safe-area-inset-top); --safe-bottom: env(safe-area-inset-bottom); }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif; 
+            -webkit-tap-highlight-color: transparent; 
+            overflow: hidden; /* App handles scroll */
+        }
         
-        /* Smooth Transitions */
-        .fade-enter { opacity: 0; transform: translateY(10px); }
-        .fade-enter-active { opacity: 1; transform: translateY(0); transition: opacity 300ms, transform 300ms; }
-        .fade-exit { opacity: 1; transform: scale(1); }
-        .fade-exit-active { opacity: 0; transform: scale(0.95); transition: opacity 200ms, transform 200ms; }
-        
-        /* Hide Scrollbar but keep functionality */
+        /* Utilities */
+        .safe-pt { padding-top: max(20px, var(--safe-top)); }
+        .safe-pb { padding-bottom: max(20px, var(--safe-bottom)); }
         .no-scrollbar::-webkit-scrollbar { display: none; }
-        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-
-        /* Card Elevation */
-        .journal-card { box-shadow: 0 4px 20px -2px rgba(0,0,0,0.05); background: white; border-radius: 16px; }
+        .glass { background: rgba(255, 255, 255, 0.85); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
+        .dark .glass { background: rgba(30, 30, 30, 0.85); }
         
-        /* Floating Input */
-        .floating-input:focus ~ label, .floating-input:not(:placeholder-shown) ~ label { transform: translateY(-120%) scale(0.85); color: #6366F1; }
+        /* iOS Inputs */
+        input[type="number"], input[type="text"] { -moz-appearance: textfield; }
+        input::-webkit-outer-spin-button, input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
     </style>
+    
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        ios: { bg: '#F2F2F7', card: '#FFFFFF', blue: '#007AFF', red: '#FF3B30', green: '#34C759' }
+                    }
+                }
+            }
+        }
+    </script>
 </head>
-<body>
+<body class="bg-gray-100 text-gray-900 dark:bg-black dark:text-white transition-colors duration-300">
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect, useRef, useMemo } = React;
+        const { useState, useEffect, useRef, useMemo, useContext, createContext } = React;
+        const { motion, AnimatePresence } = window.Motion;
 
-        // --- DATABASE LAYER (Dexie.js) ---
-        const db = new Dexie('HealthJournalDB');
-        db.version(1).stores({
-            entries: 'date, weight, bodyFat, *tags'
+        // --- 1. CONFIG & THEMES ---
+        const THEMES = {
+            monochrome: { primary: 'bg-gray-900', text: 'text-gray-900', accent: 'gray', ring: 'ring-gray-900' },
+            ocean: { primary: 'bg-blue-600', text: 'text-blue-600', accent: 'blue', ring: 'ring-blue-600' },
+            forest: { primary: 'bg-emerald-600', text: 'text-emerald-600', accent: 'emerald', ring: 'ring-emerald-600' },
+        };
+
+        // --- 2. DATABASE ---
+        const db = new Dexie('HealthOS_DB');
+        db.version(2).stores({
+            entries: 'date, weight, *custom', // *custom is for flexible columns
+            settings: 'key',
+            goals: 'id'
         });
 
-        // --- UTILS ---
-        const formatDate = (d) => d.toISOString().split('T')[0];
-        const toKg = (lb) => (lb * 0.453592).toFixed(1);
-        
-        // --- COMPONENTS ---
+        // --- 3. CONTEXTS ---
+        const AppContext = createContext();
 
-        // 1. Tab Bar
-        const TabBar = ({ active, setTab }) => {
-            const tabs = [
-                { id: 'today', icon: 'pen-tool', label: 'Today' },
-                { id: 'trends', icon: 'line-chart', label: 'Trends' },
-                { id: 'history', icon: 'history', label: 'History' },
-                { id: 'settings', icon: 'settings', label: 'Settings' }
-            ];
+        // --- 4. COMPONENTS ---
 
-            useEffect(() => { lucide.createIcons(); }, [active]);
-
-            return (
-                <div className="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-md border-t border-gray-200 pb-safe pt-2 px-6 flex justify-between items-center z-50 h-[80px]">
-                    {tabs.map(t => (
-                        <button key={t.id} onClick={() => setTab(t.id)} className={`flex flex-col items-center space-y-1 w-16 transition-colors duration-200 ${active === t.id ? 'text-indigo-600' : 'text-gray-400'}`}>
-                            <i data-lucide={t.icon} className="w-6 h-6"></i>
-                            <span className="text-[10px] font-medium tracking-wide">{t.label}</span>
-                        </button>
-                    ))}
-                </div>
-            );
-        };
-
-        // 2. Today Tab (Wizard Flow)
-        const TodayTab = () => {
-            const [step, setStep] = useState(0);
-            const [data, setData] = useState({ date: formatDate(new Date()), weight: '', bodyFat: '', notes: '' });
-            const [saved, setSaved] = useState(false);
-
-            const handleNext = () => setStep(s => s + 1);
-            const handleChange = (f, v) => setData(p => ({ ...p, [f]: v }));
-            
-            const saveEntry = async () => {
-                await db.entries.put({ ...data, weight: parseFloat(data.weight), bodyFat: parseFloat(data.bodyFat) });
-                setSaved(true);
+        // --- TAB: TODAY (DASHBOARD) ---
+        const TodayTab = ({ goals, lastEntry, openEntryModal, theme }) => {
+            const getProgress = (goal) => {
+                if (!lastEntry) return 0;
+                // Check standard metric or custom metric
+                const val = lastEntry[goal.metric] || (lastEntry.custom && lastEntry.custom[goal.metric]);
+                if (!val) return 0;
+                return Math.min(100, (val / goal.target) * 100);
             };
 
-            if (saved) return (
-                <div className="h-screen flex flex-col items-center justify-center p-8 bg-indigo-50 text-center animate-fade-in">
-                    <div className="w-16 h-16 bg-green-500 rounded-full flex items-center justify-center text-white mb-4 shadow-lg">
-                        <i data-lucide="check" className="w-8 h-8"></i>
-                    </div>
-                    <h2 className="text-2xl font-bold text-gray-800">Entry Logged</h2>
-                    <p className="text-gray-500 mt-2">See you tomorrow.</p>
-                    <button onClick={() => setSaved(false)} className="mt-8 text-indigo-600 font-medium">Edit Entry</button>
-                </div>
-            );
-
             return (
-                <div className="pt-12 px-6 pb-32 max-w-md mx-auto min-h-screen">
-                    <h1 className="text-3xl font-bold text-gray-900 mb-1">{new Date().toLocaleDateString('en-US', { weekday: 'long' })}</h1>
-                    <p className="text-gray-500 mb-8 text-lg">{new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}</p>
-
-                    {/* Step 1: Weight */}
-                    <div className={`journal-card p-6 mb-4 transition-all duration-500 ${step > 0 ? 'opacity-50 scale-95' : 'opacity-100 scale-100'}`}>
-                        <label className="text-xs font-bold text-gray-400 uppercase tracking-wider">Step 1</label>
-                        <h3 className="text-xl font-semibold text-gray-800 mb-4">Morning Weight</h3>
-                        <div className="flex items-baseline space-x-2">
-                            <input 
-                                type="number" 
-                                value={data.weight} 
-                                onChange={(e) => handleChange('weight', e.target.value)}
-                                placeholder="0.0" 
-                                className="w-full text-5xl font-light text-indigo-600 bg-transparent outline-none tabular-nums placeholder-gray-200"
-                                autoFocus
-                            />
-                            <span className="text-xl text-gray-400 font-medium">lbs</span>
+                <div className="h-full overflow-y-auto no-scrollbar pt-2 px-6 safe-pb pb-32">
+                    <div className="flex justify-between items-end mb-8 mt-2">
+                        <div>
+                            <h2 className="text-gray-500 font-medium uppercase tracking-wider text-xs">Today</h2>
+                            <h1 className="text-4xl font-bold tracking-tight">{new Date().toLocaleDateString('en-US', { weekday: 'long' })}</h1>
                         </div>
-                        {step === 0 && data.weight && (
-                            <button onClick={handleNext} className="mt-6 w-full py-3 bg-indigo-600 text-white rounded-xl font-semibold shadow-lg shadow-indigo-200 active:scale-95 transition-transform">
-                                Next
-                            </button>
+                        <div className={`w-10 h-10 rounded-full ${THEMES[theme].primary} text-white flex items-center justify-center shadow-lg`}>
+                            <span className="font-bold text-sm">{lastEntry ? 'LOG' : 'OFF'}</span>
+                        </div>
+                    </div>
+
+                    {/* Progress Cards */}
+                    <div className="space-y-4">
+                        {goals.filter(g => g.enabled).length === 0 ? (
+                            <div className="p-8 text-center text-gray-400 bg-white dark:bg-gray-900 rounded-2xl border-2 border-dashed border-gray-200 dark:border-gray-800">
+                                <p>No goals set.</p>
+                                <p className="text-sm mt-1">Go to the "Goals" tab to start tracking.</p>
+                            </div>
+                        ) : (
+                            goals.filter(g => g.enabled).map(goal => {
+                                const pct = getProgress(goal);
+                                return (
+                                    <div key={goal.id} className="bg-white dark:bg-gray-900 rounded-2xl p-5 shadow-sm border border-gray-100 dark:border-gray-800">
+                                        <div className="flex justify-between items-center mb-3">
+                                            <span className="font-semibold text-lg">{goal.label}</span>
+                                            <span className={`text-sm font-bold ${THEMES[theme].text}`}>{pct.toFixed(0)}%</span>
+                                        </div>
+                                        <div className="h-3 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
+                                            <motion.div 
+                                                initial={{ width: 0 }} 
+                                                animate={{ width: `${pct}%` }} 
+                                                transition={{ duration: 1, ease: "easeOut" }}
+                                                className={`h-full ${THEMES[theme].primary}`}
+                                            />
+                                        </div>
+                                        <div className="flex justify-between mt-2 text-xs text-gray-400">
+                                            <span>0</span>
+                                            <span>Target: {goal.target} {goal.unit}</span>
+                                        </div>
+                                    </div>
+                                );
+                            })
                         )}
                     </div>
-
-                    {/* Step 2: Metrics */}
-                    {step >= 1 && (
-                        <div className="journal-card p-6 mb-4 animate-fade-in">
-                            <label className="text-xs font-bold text-gray-400 uppercase tracking-wider">Step 2</label>
-                            <h3 className="text-xl font-semibold text-gray-800 mb-4">Composition</h3>
-                            <div className="relative pt-4">
-                                <input 
-                                    type="number" 
-                                    value={data.bodyFat} 
-                                    onChange={(e) => handleChange('bodyFat', e.target.value)}
-                                    className="floating-input w-full bg-gray-50 border-b-2 border-gray-200 p-2 text-xl outline-none focus:border-indigo-500 transition-colors"
-                                    placeholder=" "
-                                />
-                                <label className="absolute left-2 top-2 text-gray-400 text-lg transition-all pointer-events-none">Body Fat %</label>
-                            </div>
-                            {step === 1 && (
-                                <button onClick={handleNext} className="mt-6 w-full py-3 bg-gray-900 text-white rounded-xl font-semibold active:scale-95 transition-transform">
-                                    Next
-                                </button>
-                            )}
-                        </div>
-                    )}
-
-                    {/* Step 3: Notes & Save */}
-                    {step >= 2 && (
-                        <div className="journal-card p-6 animate-fade-in">
-                            <label className="text-xs font-bold text-gray-400 uppercase tracking-wider">Step 3</label>
-                            <h3 className="text-xl font-semibold text-gray-800 mb-4">Notes</h3>
-                            <textarea 
-                                value={data.notes} 
-                                onChange={(e) => handleChange('notes', e.target.value)}
-                                className="w-full h-24 bg-gray-50 rounded-lg p-3 text-gray-700 outline-none resize-none focus:ring-2 ring-indigo-100"
-                                placeholder="How do you feel today?"
-                            ></textarea>
-                            <button onClick={saveEntry} className="mt-6 w-full py-3 bg-indigo-600 text-white rounded-xl font-semibold shadow-lg shadow-indigo-200 active:scale-95 transition-transform">
-                                Complete Entry
-                            </button>
-                        </div>
-                    )}
                 </div>
             );
         };
 
-        // 3. Trends Tab (Chart.js)
-        const TrendsTab = () => {
-            const canvasRef = useRef(null);
-            
-            useEffect(() => {
-                const loadData = async () => {
-                    const entries = await db.entries.orderBy('date').toArray();
-                    if (!entries.length) return;
+        // --- TAB: HISTORY (SPREADSHEET) ---
+        const HistoryTab = ({ theme }) => {
+            const [entries, setEntries] = useState([]);
+            const [isEditing, setIsEditing] = useState(false);
+            const [columns, setColumns] = useState(['weight', 'bodyFat']); // Default columns
 
-                    // Simple Moving Average for "Projection"
-                    const weights = entries.map(e => e.weight);
-                    const dates = entries.map(e => e.date.slice(5)); // MM-DD
-                    
-                    const ctx = canvasRef.current.getContext('2d');
-                    new Chart(ctx, {
-                        type: 'line',
-                        data: {
-                            labels: dates,
-                            datasets: [{
-                                label: 'Weight (lbs)',
-                                data: weights,
-                                borderColor: '#4F46E5',
-                                backgroundColor: 'rgba(79, 70, 229, 0.1)',
-                                tension: 0.4,
-                                fill: true,
-                                pointRadius: 0,
-                                pointHitRadius: 20
-                            }]
-                        },
-                        options: {
-                            responsive: true,
-                            maintainAspectRatio: false,
-                            plugins: { legend: { display: false } },
-                            scales: {
-                                x: { grid: { display: false } },
-                                y: { border: { display: false }, grid: { color: '#f3f4f6' } }
-                            }
-                        }
-                    });
-                };
+            useEffect(() => {
                 loadData();
             }, []);
 
-            return (
-                <div className="h-screen pt-12 px-4 pb-32 flex flex-col">
-                    <h1 className="text-3xl font-bold text-gray-900 mb-6 px-2">Trends</h1>
-                    <div className="journal-card flex-1 p-4 h-64 relative">
-                        <canvas ref={canvasRef}></canvas>
-                    </div>
-                </div>
-            );
-        };
+            const loadData = async () => {
+                const data = await db.entries.orderBy('date').reverse().toArray();
+                setEntries(data);
+                
+                // Discover dynamic columns from data
+                const dynCols = new Set(['weight', 'bodyFat']);
+                data.forEach(e => {
+                    if (e.custom) Object.keys(e.custom).forEach(k => dynCols.add(k));
+                });
+                setColumns(Array.from(dynCols));
+            };
 
-        // 4. Settings Tab (Data Safety)
-        const SettingsTab = () => {
-            const exportData = async () => {
-                const allData = await db.entries.toArray();
-                const blob = new Blob([JSON.stringify(allData, null, 2)], {type : 'application/json'});
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `journal-backup-${new Date().toISOString()}.json`;
-                a.click();
+            const handleDelete = async (date) => {
+                await db.entries.delete(date);
+                loadData();
+            };
+
+            const handleCellEdit = async (date, col, val) => {
+                const num = parseFloat(val);
+                if (isNaN(num)) return;
+                
+                const entry = await db.entries.get(date);
+                if (['weight', 'bodyFat'].includes(col)) {
+                    await db.entries.update(date, { [col]: num });
+                } else {
+                    const custom = entry.custom || {};
+                    custom[col] = num;
+                    await db.entries.update(date, { custom });
+                }
+            };
+
+            const addColumn = () => {
+                const name = prompt("Name of new metric (e.g., 'Water', 'Sleep')");
+                if (name) {
+                    const key = name.toLowerCase().replace(/\s/g, '_');
+                    setColumns(prev => [...prev, key]);
+                }
             };
 
             return (
-                <div className="pt-12 px-6 pb-32">
-                    <h1 className="text-3xl font-bold text-gray-900 mb-8">Settings</h1>
+                <div className="h-full flex flex-col pt-2 bg-white dark:bg-black">
+                    {/* Header */}
+                    <div className="px-6 mb-4 flex justify-between items-center">
+                        <h1 className="text-3xl font-bold">History</h1>
+                        <button 
+                            onClick={() => setIsEditing(!isEditing)}
+                            className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors ${isEditing ? THEMES[theme].primary + ' text-white' : 'bg-gray-100 text-gray-600 dark:bg-gray-800'}`}
+                        >
+                            <i data-lucide={isEditing ? 'check' : 'pencil'} className="w-5 h-5"></i>
+                        </button>
+                    </div>
+
+                    {/* Spreadsheet Container */}
+                    <div className="flex-1 overflow-auto relative border-t border-gray-200 dark:border-gray-800">
+                        <table className="w-full text-left border-collapse">
+                            <thead className="bg-gray-50 dark:bg-gray-900 sticky top-0 z-10 shadow-sm">
+                                <tr>
+                                    <th className={`p-4 font-semibold text-xs text-gray-500 uppercase w-12 ${!isEditing && 'hidden'}`}></th>
+                                    <th className="p-4 font-semibold text-xs text-gray-500 uppercase sticky left-0 bg-gray-50 dark:bg-gray-900 z-20 border-r dark:border-gray-800">Date</th>
+                                    {columns.map(col => (
+                                        <th key={col} className="p-4 font-semibold text-xs text-gray-500 uppercase border-r dark:border-gray-800 whitespace-nowrap min-w-[100px]">
+                                            {col.replace('_', ' ')}
+                                        </th>
+                                    ))}
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                                {entries.map(row => (
+                                    <tr key={row.date} className="group">
+                                        <td className={`pl-4 py-3 ${!isEditing && 'hidden'}`}>
+                                            <button onClick={() => handleDelete(row.date)} className="w-6 h-6 bg-red-500 rounded-full flex items-center justify-center text-white shadow-sm">
+                                                <i data-lucide="minus" className="w-4 h-4"></i>
+                                            </button>
+                                        </td>
+                                        <td className="p-4 font-medium text-gray-900 dark:text-gray-100 sticky left-0 bg-white dark:bg-black z-10 border-r dark:border-gray-800 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">
+                                            {row.date.slice(5)}
+                                        </td>
+                                        {columns.map(col => {
+                                            const val = ['weight', 'bodyFat'].includes(col) ? row[col] : (row.custom?.[col]);
+                                            return (
+                                                <td key={col} className="p-0 border-r dark:border-gray-800">
+                                                    {isEditing ? (
+                                                        <input 
+                                                            type="number" 
+                                                            defaultValue={val} 
+                                                            onBlur={(e) => handleCellEdit(row.date, col, e.target.value)}
+                                                            className="w-full h-full p-4 bg-transparent outline-none focus:bg-blue-50 dark:focus:bg-blue-900/20"
+                                                        />
+                                                    ) : (
+                                                        <div className="p-4 text-gray-600 dark:text-gray-400">{val || '-'}</div>
+                                                    )}
+                                                </td>
+                                            );
+                                        })}
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    {/* Floating Add Column Button (Only in Edit Mode) */}
+                    <AnimatePresence>
+                        {isEditing && (
+                            <motion.button
+                                initial={{ scale: 0, opacity: 0 }}
+                                animate={{ scale: 1, opacity: 1 }}
+                                exit={{ scale: 0, opacity: 0 }}
+                                onClick={addColumn}
+                                className={`absolute bottom-24 left-6 shadow-xl w-12 h-12 rounded-full ${THEMES[theme].primary} text-white flex items-center justify-center z-30`}
+                            >
+                                <i data-lucide="plus" className="w-6 h-6"></i>
+                            </motion.button>
+                        )}
+                    </AnimatePresence>
+                </div>
+            );
+        };
+
+        // --- TAB: GOALS (CLOCK STYLE) ---
+        const GoalsTab = ({ goals, setGoals, theme }) => {
+            const toggleGoal = (id) => {
+                const updated = goals.map(g => g.id === id ? { ...g, enabled: !g.enabled } : g);
+                setGoals(updated);
+                db.goals.bulkPut(updated);
+            };
+
+            return (
+                <div className="pt-2 px-0 h-full overflow-y-auto no-scrollbar safe-pb pb-32">
+                    <div className="px-6 mb-6">
+                        <h1 className="text-3xl font-bold">Goals</h1>
+                    </div>
                     
-                    <div className="space-y-4">
-                        <div className="journal-card p-4 flex justify-between items-center">
-                            <div>
-                                <h4 className="font-semibold text-gray-800">Export Data</h4>
-                                <p className="text-xs text-gray-500">Save JSON backup to device</p>
+                    <div className="bg-white dark:bg-gray-900 border-t border-b border-gray-200 dark:border-gray-800">
+                        {goals.map((goal, idx) => (
+                            <div key={goal.id} className={`flex items-center p-4 pl-6 ${idx !== goals.length -1 ? 'border-b border-gray-100 dark:border-gray-800' : ''}`}>
+                                {/* Toggle (Checkmark style) */}
+                                <button 
+                                    onClick={() => toggleGoal(goal.id)}
+                                    className={`w-6 h-6 rounded border flex items-center justify-center mr-4 transition-all ${goal.enabled ? THEMES[theme].primary + ' border-transparent' : 'border-gray-300 dark:border-gray-600'}`}
+                                >
+                                    {goal.enabled && <i data-lucide="check" className="w-4 h-4 text-white"></i>}
+                                </button>
+                                
+                                <div className="flex-1">
+                                    <div className="flex justify-between items-baseline">
+                                        <span className={`text-xl font-light ${goal.enabled ? 'text-gray-900 dark:text-white' : 'text-gray-400'}`}>
+                                            {goal.label}
+                                        </span>
+                                        <span className="text-gray-500 font-mono text-sm">{goal.target} {goal.unit}</span>
+                                    </div>
+                                </div>
                             </div>
-                            <button onClick={exportData} className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm font-medium">Export</button>
-                        </div>
-                         <div className="journal-card p-4">
-                            <h4 className="font-semibold text-gray-800 mb-2">Storage Info</h4>
-                            <p className="text-sm text-gray-600">Using IndexedDB (Safe Local Storage)</p>
-                            <p className="text-xs text-green-600 mt-1 flex items-center"><i data-lucide="shield" className="w-3 h-3 mr-1"></i> Data is encrypted by device OS</p>
-                        </div>
+                        ))}
+                    </div>
+                    <div className="p-6 text-center">
+                        <p className="text-xs text-gray-400">Enabled goals appear on the "Today" dashboard.</p>
                     </div>
                 </div>
             );
         };
 
-        // --- MAIN APP ---
-        const App = () => {
-            const [activeTab, setTab] = useState('today');
+        // --- TAB: SETTINGS ---
+        const SettingsTab = ({ settings, setSettings, theme }) => {
+            const themes = ['monochrome', 'ocean', 'forest'];
             
+            const updateSetting = (k, v) => {
+                const newS = { ...settings, [k]: v };
+                setSettings(newS);
+                db.settings.put({ key: 'config', val: newS });
+                if(k === 'mode') {
+                    if (v === 'dark') document.documentElement.classList.add('dark');
+                    else if (v === 'light') document.documentElement.classList.remove('dark');
+                    else {
+                        if (window.matchMedia('(prefers-color-scheme: dark)').matches) document.documentElement.classList.add('dark');
+                        else document.documentElement.classList.remove('dark');
+                    }
+                }
+            };
+
             return (
-                <div className="min-h-screen bg-[#F5F5F7]">
-                    {activeTab === 'today' && <TodayTab />}
-                    {activeTab === 'trends' && <TrendsTab />}
-                    {activeTab === 'history' && <div className="pt-20 text-center text-gray-400">History List Component</div>}
-                    {activeTab === 'settings' && <SettingsTab />}
-                    <TabBar active={activeTab} setTab={setTab} />
+                <div className="pt-2 px-6 h-full safe-pb pb-32">
+                    <h1 className="text-3xl font-bold mb-8">Settings</h1>
+                    
+                    {/* Theme Section */}
+                    <section className="mb-8">
+                        <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Appearance</h3>
+                        <div className="bg-white dark:bg-gray-900 rounded-xl p-4 shadow-sm space-y-4">
+                            <div className="flex justify-between items-center">
+                                <span>Dark Mode</span>
+                                <select 
+                                    value={settings.mode} 
+                                    onChange={(e) => updateSetting('mode', e.target.value)}
+                                    className="bg-gray-100 dark:bg-black rounded-lg px-3 py-1 outline-none text-sm"
+                                >
+                                    <option value="auto">Auto</option>
+                                    <option value="dark">Dark</option>
+                                    <option value="light">Light</option>
+                                </select>
+                            </div>
+                            <div className="flex justify-between items-center">
+                                <span>Accent Color</span>
+                                <div className="flex space-x-2">
+                                    {themes.map(t => (
+                                        <button 
+                                            key={t}
+                                            onClick={() => updateSetting('theme', t)}
+                                            className={`w-6 h-6 rounded-full ${THEMES[t].primary} ${settings.theme === t ? 'ring-2 ring-offset-2 ring-gray-400' : ''}`}
+                                        />
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                     {/* Units Section */}
+                     <section>
+                        <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Units</h3>
+                        <div className="bg-white dark:bg-gray-900 rounded-xl p-4 shadow-sm flex justify-between">
+                             <span>Measurement System</span>
+                             <div className="bg-gray-100 dark:bg-black rounded-lg p-1 flex text-xs font-bold">
+                                <button 
+                                    onClick={() => updateSetting('unit', 'imperial')}
+                                    className={`px-3 py-1 rounded-md transition-all ${settings.unit === 'imperial' ? 'bg-white dark:bg-gray-800 shadow-sm' : 'text-gray-400'}`}
+                                >Imp</button>
+                                <button 
+                                    onClick={() => updateSetting('unit', 'metric')}
+                                    className={`px-3 py-1 rounded-md transition-all ${settings.unit === 'metric' ? 'bg-white dark:bg-gray-800 shadow-sm' : 'text-gray-400'}`}
+                                >Met</button>
+                             </div>
+                        </div>
+                    </section>
                 </div>
             );
         };
+
+        // --- NEW ENTRY MODAL (Slide Up) ---
+        const EntryModal = ({ close, theme, settings }) => {
+            const [data, setData] = useState({ 
+                date: new Date().toISOString().split('T')[0], 
+                weight: '', bodyFat: '', notes: '' 
+            });
+
+            const save = async () => {
+                await db.entries.put({ ...data, weight: parseFloat(data.weight), bodyFat: parseFloat(data.bodyFat) });
+                close(true); // true = refresh data
+            };
+
+            return (
+                <motion.div 
+                    initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                    className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 backdrop-blur-sm"
+                    onClick={() => close(false)}
+                >
+                    <motion.div 
+                        initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
+                        transition={{ type: "spring", damping: 25, stiffness: 300 }}
+                        className="w-full max-w-lg bg-white dark:bg-gray-900 rounded-t-3xl p-6 pb-safe safe-pt shadow-2xl h-[85vh] overflow-y-auto"
+                        onClick={e => e.stopPropagation()}
+                    >
+                        <div className="w-12 h-1 bg-gray-300 dark:bg-gray-700 rounded-full mx-auto mb-8" />
+                        
+                        <h2 className="text-2xl font-bold mb-6 text-center">New Entry</h2>
+                        
+                        <div className="space-y-6">
+                            <div className="bg-gray-50 dark:bg-black p-6 rounded-2xl text-center">
+                                <label className="text-xs font-bold text-gray-400 uppercase">Weight ({settings.unit === 'imperial' ? 'lbs' : 'kg'})</label>
+                                <input 
+                                    type="number" autoFocus
+                                    value={data.weight}
+                                    onChange={e => setData({...data, weight: e.target.value})}
+                                    className="block w-full text-center bg-transparent text-5xl font-light outline-none mt-2"
+                                    placeholder="0.0"
+                                />
+                            </div>
+
+                            <div className="bg-gray-50 dark:bg-black p-4 rounded-xl flex items-center justify-between">
+                                <label className="font-medium">Body Fat %</label>
+                                <input 
+                                    type="number"
+                                    value={data.bodyFat}
+                                    onChange={e => setData({...data, bodyFat: e.target.value})}
+                                    className="bg-transparent text-right text-xl outline-none w-24"
+                                    placeholder="--"
+                                />
+                            </div>
+
+                            <div className="bg-gray-50 dark:bg-black p-4 rounded-xl">
+                                <label className="block font-medium mb-2">Notes</label>
+                                <textarea 
+                                    value={data.notes}
+                                    onChange={e => setData({...data, notes: e.target.value})}
+                                    className="w-full bg-transparent outline-none resize-none h-20 text-gray-600 dark:text-gray-400"
+                                    placeholder="How are you feeling?"
+                                />
+                            </div>
+
+                            <button onClick={save} className={`w-full py-4 rounded-xl font-bold text-white text-lg shadow-lg ${THEMES[theme].primary}`}>
+                                Save Entry
+                            </button>
+                        </div>
+                    </motion.div>
+                </motion.div>
+            );
+        };
+
+        // --- MAIN APP SHELL ---
+        const App = () => {
+            const [activeTab, setActiveTab] = useState('today');
+            const [prevTab, setPrevTab] = useState('today');
+            const [showModal, setShowModal] = useState(false);
+            const [lastEntry, setLastEntry] = useState(null);
+            
+            // App State
+            const [settings, setSettings] = useState({ theme: 'monochrome', unit: 'imperial', mode: 'auto' });
+            const [goals, setGoals] = useState([
+                { id: 1, label: 'Weight', target: 170, unit: 'lbs', metric: 'weight', enabled: true },
+                { id: 2, label: 'Body Fat', target: 12, unit: '%', metric: 'bodyFat', enabled: true },
+            ]);
+
+            const tabs = ['today', 'trends', 'goals', 'history', 'settings'];
+            const tabIdx = tabs.indexOf(activeTab);
+            const prevIdx = tabs.indexOf(prevTab);
+            const direction = tabIdx > prevIdx ? 1 : -1;
+
+            // Load Initial Data
+            useEffect(() => {
+                const init = async () => {
+                    // Settings
+                    const s = await db.settings.get('config');
+                    if (s) setSettings(s.val);
+                    
+                    // Goals
+                    const g = await db.goals.toArray();
+                    if (g.length) setGoals(g);
+                    else await db.goals.bulkPut(goals); // defaults
+                    
+                    // Last Entry
+                    refreshData();
+                };
+                init();
+                lucide.createIcons();
+            }, []);
+
+            useEffect(() => {
+                // Apply theme mode classes
+                if (settings.mode === 'dark') document.documentElement.classList.add('dark');
+                else if (settings.mode === 'light') document.documentElement.classList.remove('dark');
+                else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) document.documentElement.classList.add('dark');
+            }, [settings.mode]);
+
+            const refreshData = async () => {
+                const last = await db.entries.orderBy('date').last();
+                setLastEntry(last);
+            };
+
+            const switchTab = (id) => {
+                setPrevTab(activeTab);
+                setActiveTab(id);
+            };
+
+            const variants = {
+                enter: (dir) => ({ x: dir > 0 ? 300 : -300, opacity: 0 }),
+                center: { x: 0, opacity: 1 },
+                exit: (dir) => ({ x: dir > 0 ? -300 : 300, opacity: 0 })
+            };
+
+            return (
+                <div className={`h-screen w-screen overflow-hidden flex flex-col ${THEMES[settings.theme].text.replace('text-', 'selection:bg-')}`}>
+                    {/* Content Area */}
+                    <main className="flex-1 relative safe-pt">
+                        <AnimatePresence custom={direction} mode="popLayout">
+                            <motion.div
+                                key={activeTab}
+                                custom={direction}
+                                variants={variants}
+                                initial="enter"
+                                animate="center"
+                                exit="exit"
+                                transition={{ type: "tween", ease: "circOut", duration: 0.3 }}
+                                className="absolute inset-0 w-full h-full"
+                            >
+                                {activeTab === 'today' && <TodayTab goals={goals} lastEntry={lastEntry} theme={settings.theme} />}
+                                {activeTab === 'trends' && <div className="p-8 text-center text-gray-400">Trends Graph (Placeholder)</div>}
+                                {activeTab === 'goals' && <GoalsTab goals={goals} setGoals={setGoals} theme={settings.theme} />}
+                                {activeTab === 'history' && <HistoryTab theme={settings.theme} />}
+                                {activeTab === 'settings' && <SettingsTab settings={settings} setSettings={setSettings} theme={settings.theme} />}
+                            </motion.div>
+                        </AnimatePresence>
+                    </main>
+
+                    {/* Bottom Nav */}
+                    <div className="fixed bottom-0 left-0 right-0 glass border-t border-gray-200 dark:border-gray-800 z-50 safe-pb h-[88px] flex justify-around items-center px-2">
+                        <NavButton id="today" icon="layout-dashboard" label="Today" active={activeTab} set={switchTab} theme={settings.theme} />
+                        <NavButton id="trends" icon="activity" label="Trends" active={activeTab} set={switchTab} theme={settings.theme} />
+                        
+                        {/* FAB: Center Add Button (Hidden on Settings) */}
+                        <div className="w-16 flex justify-center">
+                           {activeTab !== 'settings' && (
+                               <motion.button 
+                                    whileTap={{ scale: 0.9 }}
+                                    onClick={() => setShowModal(true)}
+                                    className={`w-14 h-14 rounded-full ${THEMES[settings.theme].primary} text-white shadow-lg shadow-blue-500/30 flex items-center justify-center -mt-8 border-4 border-[#F2F2F7] dark:border-black`}
+                               >
+                                   <i data-lucide="plus" className="w-8 h-8"></i>
+                               </motion.button>
+                           )}
+                        </div>
+
+                        <NavButton id="goals" icon="target" label="Goals" active={activeTab} set={switchTab} theme={settings.theme} />
+                        <NavButton id="history" icon="table-2" label="History" active={activeTab} set={switchTab} theme={settings.theme} />
+                        
+                        {/* Settings Button is separate to handle the layout symmetry */}
+                        <button onClick={() => switchTab('settings')} className={`flex flex-col items-center w-14 ${activeTab === 'settings' ? THEMES[settings.theme].text : 'text-gray-400'}`}>
+                             <i data-lucide="settings-2" className="w-6 h-6"></i>
+                             <span className="text-[10px] font-medium mt-1">Settings</span>
+                        </button>
+                    </div>
+
+                    {/* Modals */}
+                    <AnimatePresence>
+                        {showModal && <EntryModal close={(refresh) => { setShowModal(false); if(refresh) refreshData(); }} theme={settings.theme} settings={settings} />}
+                    </AnimatePresence>
+                </div>
+            );
+        };
+
+        const NavButton = ({ id, icon, label, active, set, theme }) => (
+            <button onClick={() => set(id)} className={`flex flex-col items-center w-14 transition-colors ${active === id ? THEMES[theme].text : 'text-gray-400'}`}>
+                <i data-lucide={icon} className="w-6 h-6"></i>
+                <span className="text-[10px] font-medium mt-1">{label}</span>
+            </button>
+        );
 
         const root = ReactDOM.createRoot(document.getElementById('root'));
         root.render(<App />);
     </script>
     
     <script>
-        // Register Service Worker for Offline capability
+        // Init Icons
+        window.addEventListener('load', () => lucide.createIcons());
+        // Service Worker
         if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => {
-                navigator.serviceWorker.register('./sw.js')
-                    .then(reg => console.log('SW Registered'))
-                    .catch(err => console.log('SW Failed', err));
-            });
+            navigator.serviceWorker.register('./sw.js').catch(console.error);
         }
     </script>
 </body>
