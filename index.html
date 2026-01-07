@@ -18,7 +18,8 @@
     <script src="https://unpkg.com/dexie@3/dist/dexie.min.js"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     
-    <script src="https://cdn.jsdelivr.net/npm/framer-motion@10.16.4/dist/framer-motion.js"></script>
+    <script src="https://unpkg.com/framer-motion@10.16.4/dist/framer-motion.js"></script>
+
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
@@ -83,7 +84,7 @@
 
     <script type="text/babel">
         const { useState, useEffect, useRef, useMemo, useCallback } = React;
-        const { motion, AnimatePresence } = window.Motion;
+        const { motion, AnimatePresence } = window.Motion || window.framerMotion;
 
         // --- 1. CONFIGURATION ---
 
