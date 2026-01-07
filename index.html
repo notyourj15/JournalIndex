@@ -24,7 +24,7 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
 
     <style>
         /* iOS Safe Area Variables */
@@ -146,14 +146,7 @@
         const MotionLib = window.Motion || { motion: { div: 'div', button: 'button' }, AnimatePresence: ({children}) => children };
         const { motion, AnimatePresence } = MotionLib;
 
-        // Register Chart.js Plugins (CRITICAL: Fixes the chart crash)
-        if (window.Chart) {
-            try {
-                Chart.register(window.ChartZoom, window['chartjs-plugin-annotation']); 
-            } catch (e) {
-                console.warn("Plugins already registered or failed:", e);
-            }
-        }
+   
 
         // --- THEME CONFIGURATION ---
         const THEMES = {

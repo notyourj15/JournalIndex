@@ -9,7 +9,10 @@ const ASSETS = [
   'https://unpkg.com/dexie@3/dist/dexie.min.js',
   'https://cdn.jsdelivr.net/npm/chart.js',
   'https://unpkg.com/lucide@latest',
-  'https://unpkg.com/framer-motion@10.16.4/dist/framer-motion.js'
+  'https://unpkg.com/framer-motion@10.16.4/dist/framer-motion.js',
+  'https://cdn.jsdelivr.net/npm/hammerjs@2.0.8',
+  'https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js',
+  'https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js'
 ];
 
 self.addEventListener('install', (event) => {
