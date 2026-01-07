@@ -1,2 +1,0 @@
-# JournalIndex
-journalindex app
