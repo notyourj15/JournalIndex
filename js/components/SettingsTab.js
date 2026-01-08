@@ -1,3 +1,4 @@
+const { useState, useEffect, useRef, useMemo, useCallback } = React;
 const SettingsTab = ({ settings, setSettings, theme }) => {
     const update = (k, v) => {
         const s = { ...settings, [k]: v };

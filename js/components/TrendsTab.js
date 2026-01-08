@@ -1,3 +1,4 @@
+const { useState, useEffect, useRef, useMemo, useCallback } = React;
 const TrendsTab = ({ entries, theme, unit }) => {
     const chartRef = React.useRef(null);
     const [activeKey, setActiveKey] = React.useState('weight');
